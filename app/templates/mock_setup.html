@@ -1,0 +1,32 @@
+{% extends "base.html" %}
+{% block title %}Mock Interview Setup - TufTactics{% endblock %}
+{% block content %}
+<div class="w-full max-w-xl mx-auto glass-card p-8 sm:p-10 rounded-3xl shadow-2xl relative">
+    <!-- Loading Overlay -->
+    <div id="loading-overlay" class="hidden absolute inset-0 bg-slate-950/90 backdrop-blur-md rounded-3xl z-50 flex flex-col items-center justify-center p-6 text-center space-y-4">
+        <div class="w-12 h-12 border-4 border-indigo-500 border-t-transparent rounded-full spinner"></div>
+        <h3 class="text-lg font-extrabold text-white">⚡ High Traffic / AI Generation in Progress</h3>
+        <p class="text-xs text-slate-300 max-w-sm leading-relaxed">Please wait <strong>30 to 60 seconds</strong> while our AI engine tailors your multi-round adaptive mock interview questions. Do not refresh or close this page!</p>
+    </div>
+
+    <div class="text-center mb-8"><h2 class="text-2xl sm:text-3xl font-extrabold theme-gradient-text mb-2">🚀 Adaptive Mock Interview</h2><p class="text-xs sm:text-sm text-slate-500 dark:text-slate-400">Upload your resume and specify your target role for a tailored multi-round simulation.</p></div>
+    {% if error %}
+    <div class="mb-6 p-6 bg-rose-500/10 border border-rose-500/30 text-rose-300 text-sm rounded-3xl text-center font-bold space-y-4">
+        <p>{{ error }}</p>
+        <a href="/dashboard" class="inline-block px-6 py-3 theme-btn-bg text-white rounded-2xl text-xs font-bold transition shadow-lg">Return to Dashboard ➔</a>
+    </div>
+    {% else %}
+    <form method="POST" enctype="multipart/form-data" onsubmit="showLoader()" class="space-y-6">
+        <div><label class="block text-xs font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider mb-2">Target Job Role / Title</label><input type="text" name="target_role" required class="w-full px-4 py-3.5 glass-input rounded-2xl focus:outline-none text-sm font-medium" placeholder="e.g. Senior Python Developer"></div>
+        <div><label class="block text-xs font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider mb-2">Upload Resume (PDF or DOCX)</label><input type="file" name="resume" accept=".pdf,.docx" required class="w-full px-4 py-3 glass-input rounded-2xl focus:outline-none text-sm font-medium"></div>
+        <button type="submit" class="w-full py-4 theme-btn-bg font-bold rounded-2xl transition shadow-xl text-white">Start Adaptive Interview ➔</button>
+    </form>
+    {% endif %}
+</div>
+<script>
+    function showLoader() {
+        let overlay = document.getElementById('loading-overlay');
+        if(overlay) overlay.classList.remove('hidden');
+    }
+</script>
+{% endblock %}

@@ -1,0 +1,32 @@
+{% extends "base.html" %}
+{% block title %}Interview Report Card - TufTactics{% endblock %}
+{% block content %}
+<div class="w-full max-w-3xl mx-auto glass-card p-8 sm:p-10 rounded-3xl shadow-2xl">
+    <div class="text-center mb-8">
+        <h2 class="text-2xl sm:text-3xl font-extrabold text-emerald-400 mb-2">🎉 Mock Interview Completed!</h2>
+        <p class="text-slate-400 text-sm">Target Role: <span class="text-white font-bold">{{ role }}</span></p>
+    </div>
+    <div class="glass-card p-6 rounded-3xl mb-6 text-center shadow-inner space-y-2">
+        <p class="text-2xl sm:text-3xl font-extrabold theme-gradient-text">Score: {{ score }} / {{ total }} ({{ percentage }}%)</p>
+        <p class="text-slate-300 text-xs sm:text-sm font-medium leading-relaxed bg-black/20 p-4 rounded-2xl">{{ summary }}</p>
+    </div>
+    <h3 class="text-base sm:text-lg font-bold mb-4">Detailed Question & Answer Review:</h3>
+    <div class="space-y-4 max-h-96 overflow-y-auto pr-2 mb-8">
+        {% for item in review %}
+        <div class="glass-card border {{ 'border-emerald-500/30' if item.is_correct else 'border-rose-500/30' }} p-5 rounded-2xl text-left text-xs sm:text-sm space-y-2">
+            <span class="px-2.5 py-0.5 bg-indigo-500/10 text-indigo-400 text-[10px] font-bold rounded-full">{{ item.category }}</span>
+            <p class="font-bold">{{ item.question }}</p>
+            <p><span class="text-slate-400 font-medium">Your Answer:</span> <span class="{{ 'text-emerald-400 font-bold' if item.is_correct else 'text-rose-400 font-bold' }}">{{ item.user_ans }}</span></p>
+            {% if not item.is_correct %}
+            <p><span class="text-slate-400 font-medium">Correct Answer:</span> <span class="text-emerald-400 font-bold">{{ item.correct_ans }}</span></p>
+            {% endif %}
+            <p class="text-xs text-slate-400 glass-card p-3 rounded-xl mt-2">💡 <strong>Expert Rationale:</strong> {{ item.explanation }}</p>
+        </div>
+        {% endfor %}
+    </div>
+    <div class="flex flex-col sm:flex-row gap-4">
+        <button onclick="window.print()" class="flex-1 py-4 theme-btn-bg font-bold rounded-2xl transition shadow-xl text-sm text-white">📥 Download PDF Report Card</button>
+        <a href="/mock-interview" class="flex-1 text-center py-4 bg-indigo-500/10 hover:bg-indigo-500/20 border border-indigo-500/20 font-bold rounded-2xl transition text-sm">Take New Mock Interview</a>
+    </div>
+</div>
+{% endblock %}

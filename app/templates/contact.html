@@ -1,0 +1,47 @@
+{% extends "base.html" %}
+{% block title %}Contact & Reviews - TufTactics{% endblock %}
+{% block content %}
+<div class="w-full max-w-2xl mx-auto glass-card p-8 sm:p-10 rounded-3xl shadow-2xl">
+    <div class="text-center mb-8">
+        <h2 class="text-2xl sm:text-3xl font-extrabold mb-2">Get in Touch & Feedback</h2>
+        <p class="text-sm text-slate-500 dark:text-slate-400">Share your feedback, report inquiries, or submit ratings and reviews.</p>
+    </div>
+    {% if success_msg %}
+    <div class="mb-6 p-4 bg-emerald-500/10 border border-emerald-500/20 text-emerald-600 dark:text-emerald-300 text-sm rounded-2xl text-center font-semibold">
+        {{ success_msg }}
+    </div>
+    {% endif %}
+    <div class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-8">
+        <a href="mailto:tuftactics1528@gmail.com" class="glass-card p-5 rounded-2xl text-center hover:scale-[1.02] transition flex flex-col items-center justify-center">
+            <svg class="w-7 h-7 mb-2 text-indigo-500" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z"/></svg>
+            <h4 class="font-bold text-sm mb-1">Email Support</h4>
+            <p class="text-xs text-slate-500 dark:text-slate-400 truncate w-full">tuftactics1528@gmail.com</p>
+        </a>
+        <a href="https://www.youtube.com/@TufTactics" target="_blank" class="glass-card p-5 rounded-2xl text-center hover:scale-[1.02] transition flex flex-col items-center justify-center">
+            <svg class="w-7 h-7 mb-2 text-rose-500" fill="currentColor" viewBox="0 0 24 24"><path d="M23.498 6.186a3.016 3.016 0 0 0-2.122-2.136C19.505 3.545 12 3.545 12 3.545s-7.505 0-9.377.505A3.017 3.017 0 0 0 .502 6.186C0 8.07 0 12 0 12s0 3.93.502 5.814a3.016 3.016 0 0 0 2.122 2.136c1.871.505 9.376.505 9.376.505s7.505 0 9.377-.505a3.015 3.015 0 0 0 2.122-2.136C24 15.93 24 12 24 12s0-3.93-.502-5.814zM9.545 15.568V8.432L15.818 12l-6.273 3.568z"/></svg>
+            <h4 class="font-bold text-sm mb-1">YouTube</h4>
+            <p class="text-xs text-slate-500 dark:text-slate-400">@TufTactics</p>
+        </a>
+        <a href="https://www.instagram.com/tuftactics_1/" target="_blank" class="glass-card p-5 rounded-2xl text-center hover:scale-[1.02] transition flex flex-col items-center justify-center">
+            <svg class="w-7 h-7 mb-2 text-pink-500" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><rect width="20" height="20" x="2" y="2" rx="5" ry="5"/><path d="M16 11.37A4 4 0 1 1 12.63 8 4 4 0 0 1 16 11.37z"/><line x1="17.5" x2="17.51" y1="6.5" y2="6.5"/></svg>
+            <h4 class="font-bold text-sm mb-1">Instagram</h4>
+            <p class="text-xs text-slate-500 dark:text-slate-400">@tuftactics_1</p>
+        </a>
+    </div>
+    <div class="glass-card p-6 sm:p-8 rounded-3xl">
+        <h3 class="text-lg font-extrabold mb-4">⭐ Submit Review or Feedback</h3>
+        <form method="POST" class="space-y-4">
+            <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div><label class="block text-xs font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider mb-2">Your Name</label><input type="text" name="name" required class="w-full px-4 py-3 glass-input rounded-2xl focus:outline-none text-sm font-medium" placeholder="Lokesh Krishan"></div>
+                <div><label class="block text-xs font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider mb-2">Your Email</label><input type="email" name="email" required class="w-full px-4 py-3 glass-input rounded-2xl focus:outline-none text-sm font-medium" placeholder="user@example.com"></div>
+            </div>
+            <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div><label class="block text-xs font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider mb-2">Category</label><select name="category" class="w-full px-4 py-3 glass-input rounded-2xl focus:outline-none text-sm font-medium" required><option value="Review & Rating">⭐ Review & Rating</option><option value="General Feedback">💬 General Feedback</option><option value="Bug Report">🐛 Bug Report</option></select></div>
+                <div><label class="block text-xs font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider mb-2">Star Rating</label><select name="rating" class="w-full px-4 py-3 glass-input rounded-2xl focus:outline-none text-sm font-medium"><option value="5">⭐⭐⭐⭐⭐ (5/5)</option><option value="4">⭐⭐⭐⭐ (4/5)</option><option value="3">⭐⭐⭐ (3/5)</option></select></div>
+            </div>
+            <div><label class="block text-xs font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider mb-2">Message</label><textarea name="message" rows="4" required class="w-full px-4 py-3 glass-input rounded-2xl focus:outline-none text-sm font-medium resize-none" placeholder="Write your review or feedback..."></textarea></div>
+            <button type="submit" class="w-full py-4 theme-btn-bg font-bold rounded-2xl transition shadow-xl text-white">Submit Now ➔</button>
+        </form>
+    </div>
+</div>
+{% endblock %}

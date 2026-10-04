@@ -1,0 +1,86 @@
+{% extends "base.html" %}
+{% block title %}User Dashboard - TufTactics{% endblock %}
+{% block content %}
+<div class="w-full max-w-4xl mx-auto glass-card p-8 sm:p-10 rounded-3xl shadow-2xl space-y-8">
+    <div class="flex flex-col md:flex-row justify-between items-start md:items-center border-b pb-6 gap-4 border-slate-200 dark:border-white/5">
+        <div><h1 class="text-2xl sm:text-3xl font-extrabold mb-1">Welcome, {{ user_name }}! ✨</h1><p class="text-sm text-slate-500 dark:text-slate-400">User Identification ID: <span class="font-mono text-indigo-600 dark:text-indigo-300 font-bold bg-indigo-500/10 px-3 py-1 rounded-xl border border-indigo-500/20">{{ user_id }}</span></p></div>
+        <div class="flex items-center space-x-3"><a href="/logout" class="px-4 py-2 bg-rose-500/10 border border-rose-500/20 text-rose-600 dark:text-rose-300 hover:bg-rose-500/20 text-xs font-bold rounded-2xl transition">Sign Out</a></div>
+    </div>
+
+    {% if pin_msg %}
+    <div class="p-4 bg-emerald-500/10 border border-emerald-500/30 text-emerald-300 text-sm rounded-2xl text-center font-semibold">
+        {{ pin_msg }}
+    </div>
+    {% endif %}
+
+    <!-- PIN Change Section -->
+    <div class="glass-card p-6 rounded-3xl border border-indigo-500/20">
+        <h3 class="text-lg font-bold mb-3 flex items-center space-x-2"><span>🔐 Security & Account PIN</span></h3>
+        <p class="text-xs text-slate-400 mb-4">You can update your 4-digit security PIN anytime securely from your dashboard.</p>
+        <form method="POST" action="/update-pin" class="grid grid-cols-1 sm:grid-cols-3 gap-4 items-end">
+            <div><label class="block text-xs font-bold text-slate-400 uppercase mb-2">Current PIN</label><input type="password" name="current_pin" maxlength="4" pattern="\d{4}" required oninput="this.value = this.value.replace(/[^0-9]/g, '').slice(0, 4);" class="w-full px-4 py-3 glass-input rounded-2xl focus:outline-none text-center font-bold tracking-widest text-sm" placeholder="••••"></div>
+            <div><label class="block text-xs font-bold text-slate-400 uppercase mb-2">New 4-Digit PIN</label><input type="password" name="new_pin" maxlength="4" pattern="\d{4}" required oninput="this.value = this.value.replace(/[^0-9]/g, '').slice(0, 4);" class="w-full px-4 py-3 glass-input rounded-2xl focus:outline-none text-center font-bold tracking-widest text-sm" placeholder="••••"></div>
+            <button type="submit" class="py-3 px-6 theme-btn-bg font-bold rounded-2xl transition shadow-lg text-xs text-white">Update PIN ➔</button>
+        </form>
+    </div>
+
+    <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
+        <div class="glass-card p-6 rounded-3xl border border-indigo-500/30 md:col-span-2 flex flex-col justify-between">
+            <div><h3 class="text-lg font-bold mb-1">📈 Overall Progress Score</h3><p class="text-xs text-slate-500 dark:text-slate-400 mb-4">Calculated from your average test & interview performances.</p></div>
+            <div class="flex items-center space-x-4">
+                <div class="text-3xl font-extrabold theme-gradient-text">{{ avg_score }}%</div>
+                <div class="w-full bg-black/20 h-3 rounded-full overflow-hidden"><div class="theme-btn-bg h-full rounded-full" style="width: {{ avg_score }}%;"></div></div>
+            </div>
+        </div>
+        <div class="glass-card p-6 rounded-3xl border border-indigo-500/30 flex flex-col justify-center text-center">
+            <p class="text-xs text-slate-400 uppercase font-bold tracking-wider mb-1">Total Tests & Interviews</p>
+            <p class="text-xl font-extrabold theme-gradient-text">{{ total_tests }} Tests | {{ total_interviews }} Interviews</p>
+        </div>
+    </div>
+
+    <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+        <div class="glass-card p-8 rounded-3xl flex flex-col justify-between"><div><h3 class="text-xl font-bold mb-2">🎯 Take Mock Test</h3><p class="text-sm text-slate-500 dark:text-slate-400 mb-6">Configure your Persona and start your customized skill or academic test.</p></div><a href="/quiz" class="inline-block text-center px-6 py-4 theme-btn-bg font-bold text-sm rounded-2xl transition shadow-xl text-white">Configure Mock Test ➔</a></div>
+        <div class="glass-card p-8 rounded-3xl flex flex-col justify-between"><div><h3 class="text-xl font-bold mb-2">🚀 Launch Mock Interview</h3><p class="text-sm text-slate-500 dark:text-slate-400 mb-6">Upload resume & start your multi-round adaptive corporate interview.</p></div><a href="/mock-interview" class="inline-block text-center px-6 py-4 theme-btn-bg font-bold text-sm rounded-2xl transition shadow-xl text-white">Start Mock Interview ➔</a></div>
+    </div>
+
+    <div class="glass-card p-6 sm:p-8 rounded-3xl">
+        <h3 class="text-lg font-bold mb-4">📊 Past Marksheets & Detailed Question Reviews</h3>
+        
+        {% if past_interviews %}
+        <div class="space-y-6 max-h-[600px] overflow-y-auto pr-2">
+            {% for item in past_interviews %}
+            <div class="glass-card p-6 rounded-2xl border border-indigo-500/20 space-y-4">
+                <div class="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-2 border-b pb-4 border-indigo-500/10">
+                    <div><span class="px-3 py-1 bg-indigo-500/10 text-indigo-400 text-xs font-bold rounded-full border border-indigo-500/20">{{ item.role }}</span><p class="text-xs text-slate-400 mt-2">Taken on: {{ item.timestamp }}</p></div>
+                    <div class="text-right"><span class="text-xl font-extrabold text-emerald-400">{{ item.score }}/{{ item.total }} ({{ item.percentage }}%)</span></div>
+                </div>
+                <p class="text-sm text-slate-300 bg-black/20 p-3 rounded-xl">💡 <strong>Performance Summary:</strong> {{ item.feedback_summary }}</p>
+                
+                <div class="flex justify-between items-center pt-2">
+                    <span class="text-xs text-slate-400">Need improvement?</span>
+                    <a href="/quiz" class="px-4 py-2 bg-indigo-500/20 hover:bg-indigo-500/30 text-indigo-300 text-xs font-bold rounded-xl transition">Practice via Mock Test ➔</a>
+                </div>
+
+                {% if item.review and not item.is_expired %}
+                <div class="space-y-3 mt-4">
+                    <h4 class="font-bold text-xs uppercase tracking-wider text-slate-400">Detailed Q&A Breakdown:</h4>
+                    {% for rev in item.review %}
+                    <div class="glass-card p-4 rounded-xl border {{ 'border-emerald-500/30' if rev.is_correct else 'border-rose-500/30' }} text-xs space-y-1">
+                        <span class="font-bold text-indigo-400">[{{ rev.category }}]</span>
+                        <p class="font-semibold text-white">{{ rev.question }}</p>
+                        <p>Your Answer: <span class="{{ 'text-emerald-400 font-bold' if rev.is_correct else 'text-rose-400 font-bold' }}">{{ rev.user_ans }}</span></p>
+                        {% if not rev.is_correct %}<p>Correct Answer: <span class="text-emerald-400 font-bold">{{ rev.correct_ans }}</span></p>{% endif %}
+                        <p class="text-slate-400 mt-1">Explanation: {{ rev.explanation }}</p>
+                    </div>
+                    {% endfor %}
+                </div>
+                {% else %}
+                <p class="text-xs text-slate-400 bg-black/10 p-3 rounded-xl">ℹ️ Detailed review window completed.</p>
+                {% endif %}
+            </div>
+            {% endfor %}
+        </div>
+        {% else %}<p class="text-sm text-slate-400">No mock tests or interviews taken yet. Start practicing above!</p>{% endif %}
+    </div>
+</div>
+{% endblock %}

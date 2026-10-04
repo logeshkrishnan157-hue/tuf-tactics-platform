@@ -1,0 +1,84 @@
+{% extends "base.html" %}
+{% block title %}Mock Test - TufTactics{% endblock %}
+{% block content %}
+<div class="w-full max-w-2xl mx-auto glass-card p-8 sm:p-10 rounded-3xl shadow-2xl">
+    <div class="flex flex-col sm:flex-row justify-between items-center mb-6 gap-4">
+        <div>
+            <h1 class="text-xl font-extrabold theme-gradient-text">🔥 {{ persona }} Assessment</h1>
+            <p class="text-xs text-slate-500 dark:text-slate-400 mt-1">Focus Area: <span class="text-slate-800 dark:text-slate-200 font-semibold">{{ subject }}</span></p>
+        </div>
+        <div class="flex items-center space-x-3">
+            <div id="timer-box" class="px-4 py-2 bg-indigo-500/10 border border-indigo-500/20 text-indigo-600 dark:text-indigo-300 text-xs rounded-2xl font-mono font-bold">⏳ <span id="time-left">60</span>s</div>
+        </div>
+    </div>
+    <div class="flex justify-between items-center mb-6 text-xs text-slate-500 dark:text-slate-400 font-semibold"><span id="progress-indicator">Loading questions...</span><button id="hint-btn" onclick="useHint()" class="hidden px-4 py-2 bg-amber-500/20 border border-amber-500/40 text-amber-600 dark:text-amber-300 rounded-2xl text-xs font-bold transition hover:bg-amber-500/30">💡 50-50 Hint</button></div>
+    <div id="quiz-container">
+        <div id="question-box"><h3 id="q-title" class="text-base sm:text-lg font-bold mb-6 leading-relaxed">Generating questions...</h3><div id="options-box" class="space-y-3.5 mb-8"></div><button id="next-btn" onclick="nextQuestion()" class="w-full py-4 theme-btn-bg hover:opacity-90 font-bold rounded-2xl hidden transition shadow-xl text-white">Next Question ➔</button></div>
+        <div id="result-box" class="hidden py-4 text-center"><h2 class="text-2xl font-extrabold text-emerald-400 mb-4">🎉 Test Completed Successfully!</h2><p class="text-sm text-slate-400 mb-6">Saving your answers and redirecting to dashboard...</p></div>
+    </div>
+</div>
+<script>
+    let questions = []; let currentIndex = 0; let userAnswers = {}; let timer = 60; let timerInterval = null;
+    
+    async function loadQuiz() {
+        let persona = "{{ persona }}"; let subject = "{{ subject }}"; let count = "{{ count }}";
+        try {
+            let res = await fetch(`/api/get-dynamic-quiz?persona=${encodeURIComponent(persona)}&subject=${encodeURIComponent(subject)}&count=${count}`);
+            let data = await res.json();
+            if(data.status === 'success' && data.questions.length > 0) {
+                questions = data.questions;
+                currentIndex = 0; userAnswers = {}; showQuestion();
+            } else { document.getElementById('q-title').innerText = "Failed to generate questions."; }
+        } catch (err) { console.error("Error loading quiz:", err); document.getElementById('q-title').innerText = "Error connecting to server."; }
+    }
+
+    function startTimer() {
+        timer = 60; document.getElementById('time-left').innerText = timer; document.getElementById('hint-btn').classList.add('hidden');
+        if(timerInterval) clearInterval(timerInterval);
+        timerInterval = setInterval(() => {
+            timer--; if(timer > 0) { document.getElementById('time-left').innerText = timer; }
+            else { clearInterval(timerInterval); document.getElementById('time-left').innerText = "0"; document.getElementById('hint-btn').classList.remove('hidden'); }
+        }, 1000);
+    }
+    function useHint() {
+        let q = questions[currentIndex]; let buttons = document.querySelectorAll('.option-btn'); let hiddenCount = 0;
+        buttons.forEach((btn) => { if(btn.getAttribute('data-opt') !== q.answer && hiddenCount < 2) { btn.style.opacity = '0.2'; btn.style.pointerEvents = 'none'; hiddenCount++; } });
+        document.getElementById('hint-btn').classList.add('hidden');
+    }
+    function showQuestion() {
+        if(currentIndex >= questions.length) { if(timerInterval) clearInterval(timerInterval); finishQuiz(); return; }
+        startTimer(); document.getElementById('progress-indicator').innerText = `Question ${currentIndex + 1} of ${questions.length}`;
+        let q = questions[currentIndex]; document.getElementById('q-title').innerText = `${currentIndex + 1}. ${q.question}`;
+        let optBox = document.getElementById('options-box'); optBox.innerHTML = '';
+        q.options.forEach((opt, idx) => {
+            let isSelected = userAnswers[currentIndex] === opt;
+            let activeClass = isSelected ? 'bg-indigo-600/20 border-indigo-500 font-bold shadow-md' : 'glass-card hover:border-indigo-500/40';
+            optBox.innerHTML += `<button onclick="selectOption('${escapeHtml(opt)}', this)" data-opt="${escapeHtml(opt)}" class="option-btn w-full text-left p-4 rounded-2xl border transition font-medium text-sm sm:text-base ${activeClass}"><span class="font-bold text-indigo-600 dark:text-indigo-400 mr-2">${String.fromCharCode(65 + idx)}.</span> <span>${opt}</span></button>`;
+        });
+        let nextBtn = document.getElementById('next-btn');
+        if(userAnswers[currentIndex] !== undefined) nextBtn.classList.remove('hidden'); else nextBtn.classList.add('hidden');
+    }
+    function selectOption(optVal, btnElement) {
+        userAnswers[currentIndex] = optVal;
+        document.querySelectorAll('.option-btn').forEach(btn => { btn.classList.remove('bg-indigo-600/20', 'border-indigo-500', 'font-bold', 'shadow-md'); btn.classList.add('glass-card'); });
+        btnElement.classList.remove('glass-card'); btnElement.classList.add('bg-indigo-600/20', 'border-indigo-500', 'font-bold', 'shadow-md');
+        document.getElementById('next-btn').classList.remove('hidden');
+    }
+    function nextQuestion() { currentIndex++; showQuestion(); }
+    async function finishQuiz() {
+        document.getElementById('question-box').classList.add('hidden'); document.getElementById('result-box').classList.remove('hidden');
+        let score = 0; let reviewList = [];
+        questions.forEach((q, idx) => {
+            let userAns = userAnswers[idx] || "Not Answered";
+            let isCorrect = (String(userAns).trim() === String(q.answer).trim());
+            if(isCorrect) score++;
+            reviewList.push({ "category": q.category || "Mock Test", "question": q.question, "user_ans": userAns, "correct_ans": q.answer, "is_correct": isCorrect, "explanation": q.explanation });
+        });
+        let percentage = Math.round((score / questions.length) * 100);
+        try { await fetch('/api/save-quiz-result', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ subject: "{{ subject }}", score, total: questions.length, percentage, review: reviewList }) }); } catch(e) { console.error("Error saving result:", e); }
+        setTimeout(() => { window.location.href = "/dashboard"; }, 1200);
+    }
+    function escapeHtml(text) { return text.replace(/'/g, "&#39;").replace(/"/g, "&quot;"); }
+    loadQuiz();
+</script>
+{% endblock %}

@@ -1,0 +1,2208 @@
+
+
+--- FILE START: .\.env ---
+
+GEMINI_API_KEY=AQ.Ab8RN6JHCL2ZDdte9edN5Uq84o84qmdIBPwMOyys0E14djbdpA
+
+--- FILE END: .\.env ---
+
+
+
+--- FILE START: .\daily_report.csv ---
+
+Timestamp,User ID,Name,Email,Category,Rating,Message
+2026-09-30 19:13:26,TUF-47142,Gpal,aravfgdgdinth12@gmail.com,Review & Rating,5,Nice
+2026-09-30 19:33:28,TUF-47142,Gpal,aravfgdgdinth12@gmail.com,Review & Rating,5,Nice
+2026-09-30 20:35:52,TUF-47142,Aravinth,Tuftactics@gmail.com,Review & Rating,5,doog
+2026-10-01 01:11:13,TUF-21264,lokesh,Lokesh@gmail.com,Review & Rating,5,Nice
+
+
+--- FILE END: .\daily_report.csv ---
+
+
+
+--- FILE START: .\export_project.py ---
+
+import os
+
+output_file = "full_project_code.txt"
+exclude_dirs = {".git", "__pycache__", "venv", "env", "node_modules"}
+exclude_extensions = {".png", ".jpg", ".jpeg", ".zip", ".pyc", ".db"}
+
+with open(output_file, "w", encoding="utf-8") as outfile:
+    for root, dirs, files in os.walk("."):
+        dirs[:] = [d for d in dirs if d not in exclude_dirs]
+        for file in files:
+            if any(file.endswith(ext) for ext in exclude_extensions):
+                continue
+            file_path = os.path.join(root, file)
+            outfile.write(f"\n\n--- FILE START: {file_path} ---\n\n")
+            try:
+                with open(file_path, "r", encoding="utf-8") as infile:
+                    outfile.write(infile.read())
+            except Exception as e:
+                outfile.write(f"[Error reading file: {e}]")
+            outfile.write(f"\n\n--- FILE END: {file_path} ---\n\n")
+
+print("Motham project code-um full-a export aayiduchu da!")
+
+--- FILE END: .\export_project.py ---
+
+
+
+--- FILE START: .\fix_db.py ---
+
+import os
+from run import app, db, QuestionCache, User, InterviewResult
+
+with app.app_context():
+    # 1. Backup existing questions and interview results safely
+    existing_questions = QuestionCache.query.all()
+    existing_results = InterviewResult.query.all()
+    print(f"Backed up {len(existing_questions)} questions and {len(existing_results)} interview results safely!")
+
+    # 2. Recreate tables with correct columns (including percentage in InterviewResult)
+    db.drop_all()
+    print("Dropped old tables.")
+
+    db.create_all()
+    print("Recreated all tables with correct schema (Users + QuestionCache + InterviewResult).")
+
+    # 3. Restore backup questions back into database
+    for q in existing_questions:
+        new_q = QuestionCache(
+            topic=q.topic,
+            question_text=q.question_text,
+            option_a=q.option_a,
+            option_b=q.option_b,
+            option_c=q.option_c,
+            option_d=q.option_d,
+            correct_answer=q.correct_answer,
+            explanation=q.explanation
+        )
+        db.session.add(new_q)
+
+    # 4. Restore backup interview results back into database
+    for r in existing_results:
+        new_r = InterviewResult(
+            user_id=r.user_id,
+            role=r.role,
+            score=r.score,
+            total=r.total,
+            percentage=getattr(r, 'percentage', int((r.score / r.total) * 100)),
+            feedback_summary=r.feedback_summary,
+            timestamp=r.timestamp
+        )
+        db.session.add(new_r)
+    
+    db.session.commit()
+    print(f"Successfully restored questions and interview results back to edtech.db with percentage schema!")
+
+--- FILE END: .\fix_db.py ---
+
+
+
+--- FILE START: .\full_project_code.txt ---
+
+
+
+--- FILE END: .\full_project_code.txt ---
+
+
+
+--- FILE START: .\requirements.txt ---
+
+flask==3.0.2
+python-dotenv==1.0.1
+google-generativeai==0.8.3
+Flask-SQLAlchemy==3.1.1
+reportlab==4.1.0
+pypdf==4.1.0
+
+--- FILE END: .\requirements.txt ---
+
+
+
+--- FILE START: .\run.py ---
+
+import os
+import csv
+import random
+import json
+from datetime import datetime, timedelta
+from flask import Flask, render_template, jsonify, request, session, redirect, url_for
+from flask_sqlalchemy import SQLAlchemy
+from werkzeug.utils import secure_filename
+import google.generativeai as genai
+import pypdf
+import docx
+
+BASE_DIR = os.path.abspath(os.path.dirname(__file__))
+TEMPLATE_DIR = os.path.join(BASE_DIR, 'app', 'templates')
+UPLOAD_FOLDER = os.path.join(BASE_DIR, 'app', 'uploads')
+
+app = Flask(__name__, template_folder=TEMPLATE_DIR)
+app.config['SQLALCHEMY_DATABASE_URI'] = f"sqlite:///{os.path.join(BASE_DIR, 'edtech.db')}"
+app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
+app.config['UPLOAD_FOLDER'] = UPLOAD_FOLDER
+app.secret_key = 'tuftactics_secret_secure_key'
+
+os.makedirs(UPLOAD_FOLDER, exist_ok=True)
+os.makedirs(TEMPLATE_DIR, exist_ok=True)
+
+db = SQLAlchemy(app)
+
+GEMINI_KEY = os.environ.get("GEMINI_API_KEY", "")
+if GEMINI_KEY:
+    genai.configure(api_key=GEMINI_KEY)
+
+class User(db.Model):
+    __tablename__ = 'users'
+    id = db.Column(db.Integer, primary_key=True)
+    user_unique_id = db.Column(db.String(20), unique=True, nullable=False)
+    name = db.Column(db.String(100), nullable=False)
+    email = db.Column(db.String(120), unique=True, nullable=False)
+    phone = db.Column(db.String(10), nullable=False)
+    age = db.Column(db.Integer, nullable=False)
+    pin = db.Column(db.String(4), nullable=False)
+
+class InterviewResult(db.Model):
+    __tablename__ = 'interview_results'
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.String(20), nullable=False)
+    role = db.Column(db.String(100), nullable=False)
+    score = db.Column(db.Integer, nullable=False)
+    total = db.Column(db.Integer, nullable=False)
+    percentage = db.Column(db.Integer, nullable=False)
+    feedback_summary = db.Column(db.Text, nullable=False)
+    review_details = db.Column(db.Text, nullable=True)
+    timestamp = db.Column(db.DateTime, default=datetime.now)
+
+class QuestionCache(db.Model):
+    __tablename__ = 'question_cache'
+    id = db.Column(db.Integer, primary_key=True)
+    topic = db.Column(db.String(150), index=True, nullable=False)
+    question_text = db.Column(db.Text, nullable=False)
+    options = db.Column(db.Text, nullable=False)
+    answer = db.Column(db.String(255), nullable=False)
+    explanation = db.Column(db.Text, nullable=True)
+
+# SERVER-SIDE STORAGE FOR ACTIVE INTERVIEWS (Prevents Cookie Overflow)
+class ActiveInterview(db.Model):
+    __tablename__ = 'active_interviews'
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.String(20), unique=True, nullable=False)
+    role = db.Column(db.String(100), nullable=False)
+    questions = db.Column(db.Text, nullable=False)
+    current_index = db.Column(db.Integer, default=0)
+    user_answers = db.Column(db.Text, default='{}')
+
+def append_to_daily_report(user_id, name, email, category, rating, message):
+    csv_file = os.path.join(BASE_DIR, 'daily_report.csv')
+    file_exists = os.path.isfile(csv_file)
+    with open(csv_file, mode='a', newline='', encoding='utf-8') as f:
+        writer = csv.writer(f)
+        if not file_exists:
+            writer.writerow(['Timestamp', 'User ID', 'Name', 'Email', 'Category', 'Rating', 'Message'])
+        writer.writerow([datetime.now().strftime('%Y-%m-%d %H:%M:%S'), user_id, name, email, category, rating, message])
+
+def extract_text_from_file(filepath):
+    text = ""
+    if filepath.endswith('.pdf'):
+        try:
+            reader = pypdf.PdfReader(filepath)
+            for page in reader.pages:
+                t = page.extract_text()
+                if t: text += t + "\n"
+        except Exception as e:
+            print("PDF Extraction Error:", e)
+    elif filepath.endswith('.docx'):
+        try:
+            doc = docx.Document(filepath)
+            for para in doc.paragraphs:
+                text += para.text + "\n"
+        except Exception as e:
+            print("DOCX Extraction Error:", e)
+    return text.strip()
+
+def is_valid_resume(text):
+    lower_text = text.lower()
+    resume_keywords = ['experience', 'skills', 'education', 'projects', 'summary', 'work', 'profile', 'developer', 'engineer', 'analyst', 'manager', 'degre', 'curriculum vitae', 'resume']
+    matches = sum(1 for kw in resume_keywords if kw in lower_text)
+    return len(text) > 80 and matches >= 2
+
+@app.route('/')
+def index():
+    theme = session.get('theme', 'dark')
+    return render_template('index.html', user_name=session.get('user_name'), theme=theme)
+
+@app.route('/login', methods=['GET', 'POST'])
+def login():
+    if 'user_id' in session: return redirect(url_for('dashboard'))
+    if request.method == 'POST':
+        identifier = request.form.get('identifier', '').strip().lower()
+        pin = request.form.get('pin', '').strip()
+        user = User.query.filter((db.func.lower(User.email) == identifier) | (User.phone == identifier)).first()
+        if user and user.pin == pin:
+            session['user_id'] = user.user_unique_id
+            session['user_name'] = user.name
+            return redirect(url_for('dashboard'))
+        else:
+            return render_template('login.html', error="Invalid Email/Phone or 4-Digit PIN!", theme=session.get('theme', 'dark'))
+    return render_template('login.html', theme=session.get('theme', 'dark'))
+
+@app.route('/signup', methods=['GET', 'POST'])
+def signup():
+    if 'user_id' in session: return redirect(url_for('dashboard'))
+    if request.method == 'POST':
+        name = request.form.get('name', '').strip()
+        email = request.form.get('email', '').strip().lower()
+        phone = request.form.get('phone', '').strip()
+        age = request.form.get('age', 20)
+        pin = request.form.get('pin', '').strip()
+        
+        if len(phone) != 10 or not phone.isdigit():
+            return render_template('signup.html', error="Phone number must be exactly 10 numeric digits!", theme=session.get('theme', 'dark'))
+        if len(pin) != 4 or not pin.isdigit():
+            return render_template('signup.html', error="PIN must be exactly 4 numeric digits!", theme=session.get('theme', 'dark'))
+        if User.query.filter_by(email=email).first():
+            return render_template('signup.html', error="Email already registered! Please sign in.", theme=session.get('theme', 'dark'))
+        
+        unique_id = f"TUF-{random.randint(10000, 99999)}"
+        new_user = User(user_unique_id=unique_id, name=name, email=email, phone=phone, age=int(age), pin=pin)
+        db.session.add(new_user)
+        db.session.commit()
+        session['user_id'] = unique_id
+        session['user_name'] = new_user.name
+        return redirect(url_for('dashboard'))
+    return render_template('signup.html', theme=session.get('theme', 'dark'))
+
+@app.route('/forgot-pin', methods=['GET', 'POST'])
+def forgot_pin():
+    if request.method == 'POST':
+        identifier = request.form.get('identifier', '').strip().lower()
+        name = request.form.get('name', '').strip().lower()
+        new_pin = request.form.get('new_pin', '').strip()
+        if len(new_pin) != 4 or not new_pin.isdigit():
+            return render_template('forgot_pin.html', error="New PIN must be exactly 4 digits!", theme=session.get('theme', 'dark'))
+        user = User.query.filter(((db.func.lower(User.email) == identifier) | (db.func.lower(User.phone) == identifier)) & (db.func.lower(User.name) == name)).first()
+        if user:
+            user.pin = new_pin
+            db.session.commit()
+            return render_template('login.html', error="PIN successfully updated! Please sign in with your new PIN.", theme=session.get('theme', 'dark'))
+        else:
+            return render_template('forgot_pin.html', error="Verification failed! Email/Phone and Name do not match our records.", theme=session.get('theme', 'dark'))
+    return render_template('forgot_pin.html', theme=session.get('theme', 'dark'))
+
+@app.route('/dashboard', methods=['GET'])
+def dashboard():
+    if 'user_id' not in session: return redirect(url_for('login'))
+    user = User.query.filter_by(user_unique_id=session.get('user_id')).first()
+    uid = session.get('user_id')
+    past_records = InterviewResult.query.filter_by(user_id=uid).order_by(InterviewResult.id.desc()).all()
+    
+    total_tests = sum(1 for r in past_records if r.role.startswith("Mock Test:"))
+    total_interviews = sum(1 for r in past_records if r.role.startswith("Interview:"))
+    avg_score = int(sum([item.percentage for item in past_records]) / len(past_records)) if past_records else 0
+
+    now = datetime.now()
+    processed_records = []
+    for item in past_records:
+        review_data = []
+        is_expired = (now - item.timestamp) > timedelta(hours=24)
+        if not is_expired and item.review_details:
+            try: review_data = json.loads(item.review_details)
+            except: review_data = []
+
+        processed_records.append({
+            "id": item.id, "role": item.role, "score": item.score, "total": item.total,
+            "percentage": item.percentage, "feedback_summary": item.feedback_summary,
+            "review": review_data, "is_expired": is_expired, "timestamp": item.timestamp.strftime('%Y-%m-%d %H:%M')
+        })
+
+    return render_template('dashboard.html', user_name=user.name if user else session.get('user_name'), user_id=uid, past_interviews=processed_records, avg_score=avg_score, total_tests=total_tests, total_interviews=total_interviews, theme=session.get('theme', 'dark'))
+
+@app.route('/logout')
+def logout():
+    session.clear()
+    return redirect(url_for('login'))
+
+@app.route('/about')
+def about():
+    return render_template('about.html', theme=session.get('theme', 'dark'))
+
+@app.route('/contact', methods=['GET', 'POST'])
+def contact():
+    success_msg = None
+    if request.method == 'POST':
+        name = request.form.get('name', '').strip()
+        email = request.form.get('email', '').strip()
+        category = request.form.get('category', 'General Feedback').strip()
+        rating = int(request.form.get('rating', 5))
+        msg_text = request.form.get('message', '').strip()
+        if name and email and msg_text:
+            append_to_daily_report(session.get('user_id', 'GUEST'), name, email, category, rating, msg_text)
+            success_msg = "Thank you! Your feedback and review have been successfully recorded."
+    return render_template('contact.html', success_msg=success_msg, theme=session.get('theme', 'dark'))
+
+@app.route('/terms')
+def terms():
+    return render_template('terms.html', theme=session.get('theme', 'dark'))
+
+@app.route('/mock-interview', methods=['GET', 'POST'])
+def mock_interview():
+    if 'user_id' not in session: return redirect(url_for('login'))
+    uid = session.get('user_id')
+    today_start = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
+    already_taken = InterviewResult.query.filter(InterviewResult.user_id == uid, InterviewResult.role.like("Interview:%"), InterviewResult.timestamp >= today_start).first()
+    if already_taken:
+        return render_template('mock_setup.html', error="⚠️️ Daily Limit Reached: You can only take 1 Mock Interview per day. Come back tomorrow!", theme=session.get('theme', 'dark'))
+
+    if request.method == 'POST':
+        target_role = request.form.get('target_role', 'Software Engineer').strip()
+        resume_file = request.files.get('resume')
+        
+        if not resume_file or resume_file.filename == '':
+            return render_template('mock_setup.html', error="⚠ Please upload a valid resume file (PDF or DOCX).", theme=session.get('theme', 'dark'))
+        
+        filename = secure_filename(resume_file.filename)
+        filepath = os.path.join(app.config['UPLOAD_FOLDER'], filename)
+        resume_file.save(filepath)
+        
+        # Extract text & validate if it is a real resume
+        resume_text = extract_text_from_file(filepath)
+        if os.path.exists(filepath): os.remove(filepath) # Immediate secure deletion
+        
+        if not is_valid_resume(resume_text):
+            return render_template('mock_setup.html', error="❌ Invalid Document! Uploaded file does not look like a professional resume. Please upload a valid resume containing your skills, experience, and education.", theme=session.get('theme', 'dark'))
+
+        # Generate strictly tailored dynamic questions based on extracted resume content
+        model = genai.GenerativeModel('gemini-3.8-flash')
+        prompt = f"Based on the following candidate resume text, generate 30 highly tailored professional technical interview questions strictly targeting the candidate's specific skills, projects, and experience for the role '{target_role}'. Include technical, situational, and experience-based questions. Output strictly as a JSON array of objects with keys: 'question', 'options' (array of 4 choices), 'answer' (exact matching correct option), and 'explanation'.\n\nRESUME CONTENT:\n{resume_text[:4000]}"
+        
+        try:
+            response = model.generate_content(prompt)
+            clean_res = response.text.strip().replace("```json", "").replace("```", "").strip()
+            ai_data = json.loads(clean_res)
+            questions = []
+            for item in ai_data[:30]:
+                q_text, opts, ans, exp = item.get('question'), item.get('options'), item.get('answer'), item.get('explanation', "Professional expert rationale.")
+                questions.append({"id": len(questions)+1, "category": "Resume Technical Round", "question": q_text, "options": opts, "answer": ans, "explanation": exp})
+        except Exception as e:
+            return render_template('mock_setup.html', error="⚠️ AI Generation Error: Failed to parse resume. Please try again.", theme=session.get('theme', 'dark'))
+
+        # SAVE DIRECTLY IN DATABASE TO PREVENT FLASK COOKIE SIZE LIMIT (4KB)
+        active = ActiveInterview.query.filter_by(user_id=uid).first()
+        if not active:
+            active = ActiveInterview(user_id=uid, role=target_role, questions=json.dumps(questions), current_index=0, user_answers=json.dumps({}))
+            db.session.add(active)
+        else:
+            active.role = target_role
+            active.questions = json.dumps(questions)
+            active.current_index = 0
+            active.user_answers = json.dumps({})
+        db.session.commit()
+
+        return redirect(url_for('interview_live'))
+    return render_template('mock_setup.html', theme=session.get('theme', 'dark'))
+
+@app.route('/mock-live', methods=['GET', 'POST'])
+def interview_live():
+    if 'user_id' not in session: return redirect(url_for('login'))
+    uid = session.get('user_id')
+    active = ActiveInterview.query.filter_by(user_id=uid).first()
+    if not active: return redirect(url_for('mock_interview'))
+
+    questions = json.loads(active.questions)
+    idx = active.current_index
+    user_answers = json.loads(active.user_answers)
+
+    if request.method == 'POST':
+        user_answers[str(idx)] = request.form.get('answer')
+        idx += 1
+        active.current_index = idx
+        active.user_answers = json.dumps(user_answers)
+        db.session.commit()
+
+        if idx >= len(questions):
+            role, score, detailed_review = active.role, 0, []
+            for q_idx, q in enumerate(questions):
+                user_ans = user_answers.get(str(q_idx), "Not Answered")
+                is_correct = (str(user_ans).strip() == str(q['answer']).strip())
+                if is_correct: score += 1
+                detailed_review.append({"question": q['question'], "category": q['category'], "user_ans": user_ans, "correct_ans": q['answer'], "is_correct": is_correct, "explanation": q['explanation']})
+            
+            percentage = int((score / len(questions)) * 100)
+            db.session.add(InterviewResult(user_id=uid, role=f"Interview: {role}", score=score, total=len(questions), percentage=percentage, feedback_summary=f"Resume Mock Interview for {role}: Scored {score}/{len(questions)} ({percentage}%).", review_details=json.dumps(detailed_review)))
+            db.session.delete(active)
+            db.session.commit()
+            return redirect(url_for('dashboard'))
+
+    return render_template('mock_live.html', question=questions[idx], index=idx+1, total=len(questions), role=active.role, theme=session.get('theme', 'dark'))
+
+@app.route('/quiz', methods=['GET'])
+def quiz():
+    if 'user_id' not in session: return redirect(url_for('login'))
+    uid = session.get('user_id')
+    today_start = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
+    already_taken = InterviewResult.query.filter(InterviewResult.user_id == uid, InterviewResult.role.like("Mock Test:%"), InterviewResult.timestamp >= today_start).first()
+    if already_taken:
+        return render_template('quiz_setup.html', error="⚠️ Daily Limit Reached: You can only take 1 Mock Test per day. Come back tomorrow!", theme=session.get('theme', 'dark'))
+    return render_template('quiz_setup.html', theme=session.get('theme', 'dark'))
+
+@app.route('/quiz-live')
+def quiz_live():
+    if 'user_id' not in session: return redirect(url_for('login'))
+    uid = session.get('user_id')
+    today_start = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
+    if InterviewResult.query.filter(InterviewResult.user_id == uid, InterviewResult.role.like("Mock Test:%"), InterviewResult.timestamp >= today_start).first():
+        return redirect(url_for('quiz'))
+    return render_template('quiz.html', persona=request.args.get('persona', 'Student'), subject=request.args.get('subject', 'Assessment'), count=int(request.args.get('count', 10)), theme=session.get('theme', 'dark'))
+
+@app.route('/api/set-theme', methods=['POST'])
+def set_theme():
+    session['theme'] = request.get_json().get('theme', 'dark')
+    return jsonify({"status": "success"})
+
+@app.route('/api/save-quiz-result', methods=['POST'])
+def save_quiz_result():
+    if 'user_id' not in session: return jsonify({"status": "unauthorized"}), 401
+    data = request.get_json()
+    db.session.add(InterviewResult(user_id=session.get('user_id'), role=f"Mock Test: {data.get('subject', 'Assessment')}", score=data.get('score', 0), total=data.get('total', 10), percentage=data.get('percentage', 0), feedback_summary=f"Mock Test: Scored {data.get('score', 0)}/{data.get('total', 10)} ({data.get('percentage', 0)}%).", review_details=json.dumps(data.get('review', []))))
+    db.session.commit()
+    return jsonify({"status": "success"})
+
+@app.route('/api/get-dynamic-quiz', methods=['GET'])
+def get_dynamic_quiz():
+    persona, subject, count = request.args.get('persona', 'Student'), request.args.get('subject', 'General').strip(), int(request.args.get('count', 10))
+    cached_questions = QuestionCache.query.filter_by(topic=subject).all()
+    quiz_list = []
+    if len(cached_questions) >= count:
+        for q in random.sample(cached_questions, count):
+            quiz_list.append({"id": len(quiz_list)+1, "topic": subject, "question": q.question_text, "options": json.loads(q.options), "answer": q.answer, "explanation": q.explanation})
+    else:
+        model = genai.GenerativeModel('gemini-3.8-flash')
+        response = model.generate_content(f"Generate {count} multiple-choice questions on '{subject}' for a '{persona}'. Output strictly JSON array with keys: 'question', 'options' (array of 4), 'answer', 'explanation'.")
+        ai_data = json.loads(response.text.strip().replace("```json", "").replace("```", "").strip())
+        for item in ai_data[:count]:
+            q_text, opts, ans, exp = item.get('question'), item.get('options'), item.get('answer'), item.get('explanation', "Expert professional rationale.")
+            db.session.add(QuestionCache(topic=subject, question_text=q_text, options=json.dumps(opts), answer=ans, explanation=exp))
+            quiz_list.append({"id": len(quiz_list)+1, "topic": subject, "question": q_text, "options": opts, "answer": ans, "explanation": exp})
+        db.session.commit()
+    return jsonify({"status": "success", "questions": quiz_list})
+
+if __name__ == '__main__':
+    with app.app_context(): db.create_all()
+    app.run(debug=True, port=5000)
+
+--- FILE END: .\run.py ---
+
+
+
+--- FILE START: .\setup.py ---
+
+import os
+
+os.makedirs('app/templates', exist_ok=True)
+os.makedirs('app/uploads', exist_ok=True)
+
+# 1. base.html
+base_html = '''<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{% block title %}TufTactics{% endblock %}</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap');
+        * { font-family: 'Plus Jakarta Sans', sans-serif; }
+        body.dark-mode { background-color: #0b0f19; background-attachment: fixed; color: #f8fafc; }
+        body.dark-mode .glass-card { background: rgba(15, 23, 42, 0.8); backdrop-filter: blur(25px); border: 1px solid rgba(79, 70, 229, 0.2); box-shadow: 0 20px 50px rgba(0, 0, 0, 0.6); }
+        body.dark-mode .glass-input { background: rgba(3, 7, 18, 0.85); color: #ffffff; border: 1px solid rgba(79, 70, 229, 0.3); }
+        body.dark-mode .glass-input option { background-color: #0f172a; color: #ffffff; }
+        body.light-mode { background-color: #f8fafc; background-attachment: fixed; color: #0f172a; }
+        body.light-mode .glass-card { background: rgba(255, 255, 255, 0.9); backdrop-filter: blur(25px); border: 1px solid rgba(226, 232, 240, 0.9); box-shadow: 0 20px 40px rgba(15, 23, 42, 0.06); }
+        body.light-mode .glass-input { background: rgba(255, 255, 255, 0.95); color: #0f172a; border: 1px solid rgba(203, 213, 225, 0.9); }
+        body.light-mode .glass-input option { background-color: #ffffff; color: #0f172a; }
+        body.light-mode header { background-color: rgba(255, 255, 255, 0.9) !important; border-bottom: 1px solid rgba(226, 232, 240, 0.9) !important; }
+        body.light-mode footer { background-color: rgba(248, 250, 252, 0.9) !important; border-top: 1px solid rgba(226, 232, 240, 0.9) !important; color: #475569 !important; }
+        .theme-gradient-text { background: linear-gradient(135deg, #4f46e5 0%, #3b82f6 50%, #0ea5e9 100%); -webkit-background-clip: text; -webkit-text-fill-color: transparent; }
+        .theme-btn-bg { background: linear-gradient(135deg, #4f46e5 0%, #3b82f6 100%); box-shadow: 0 10px 25px rgba(79, 70, 229, 0.4); color: #ffffff; }
+        .theme-btn-bg:hover { opacity: 0.92; transform: translateY(-1px); }
+    </style>
+</head>
+<body class="{{ theme }}-mode min-h-screen flex flex-col justify-between selection:bg-indigo-500 selection:text-white transition-colors duration-300">
+    <header class="w-full backdrop-blur-2xl sticky top-0 z-50 transition-colors duration-300 border-b border-indigo-500/10">
+        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-18 flex items-center justify-between">
+            <a href="/" class="flex items-center space-x-3"><span class="font-extrabold text-2xl tracking-tight theme-gradient-text">TufTactics</span></a>
+            <nav class="hidden lg:flex space-x-8 text-sm font-semibold text-slate-400 dark:text-slate-300">
+                <a href="/" class="hover:text-indigo-500 transition">Home</a>
+                <a href="/quiz" class="hover:text-indigo-500 transition">Mock Test</a>
+                <a href="/mock-interview" class="hover:text-indigo-500 transition font-bold text-indigo-400">Mock Interview 🚀</a>
+                <a href="/dashboard" class="hover:text-indigo-500 transition">Dashboard</a>
+                <a href="/about" class="hover:text-indigo-500 transition">About Us</a>
+                <a href="/contact" class="hover:text-indigo-500 transition">Contact</a>
+            </nav>
+            <div class="flex items-center space-x-3">
+                <button onclick="toggleTheme()" id="theme-btn" class="p-2.5 glass-card rounded-2xl text-xs font-bold transition hover:scale-105" title="Toggle Light/Dark Mode">{{ '☀️' if theme == 'light' else '🌙' }}</button>
+                {% if session.get('user_id') %}
+                <a href="/dashboard" class="px-4 py-2 bg-indigo-500/10 border border-indigo-500/20 text-indigo-600 dark:text-indigo-300 text-xs sm:text-sm font-semibold rounded-2xl transition flex items-center space-x-2"><span>✨ <span class="hidden sm:inline">{{ session.get('user_name') }}</span></span></a>
+                <a href="/logout" class="px-3 py-2 bg-rose-500/10 border border-rose-500/20 text-rose-600 dark:text-rose-300 text-xs font-bold rounded-2xl transition">Sign Out</a>
+                {% else %}
+                <a href="/login" class="px-4 py-2 text-xs sm:text-sm font-semibold text-slate-400 dark:text-slate-300 hover:text-indigo-500 transition">Sign In</a>
+                <a href="/signup" class="px-5 py-2.5 theme-btn-bg text-xs sm:text-sm font-bold rounded-2xl transition">Get Started</a>
+                {% endif %}
+            </div>
+        </div>
+    </header>
+    <main class="flex-grow flex items-center justify-center p-4 sm:p-6 lg:p-8"><div class="w-full max-w-5xl mx-auto">{% block content %}{% endblock %}</div></main>
+    <footer class="w-full py-8 text-center text-xs sm:text-sm transition-colors duration-300 border-t border-indigo-500/10">
+        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 flex flex-col sm:flex-row items-center justify-between gap-4">
+            <p class="text-slate-500 font-medium">&copy; 2026 TufTactics. All rights reserved.</p>
+            <div class="flex items-center space-x-6 text-slate-500 font-medium">
+                <a href="https://www.youtube.com/@TufTactics" target="_blank" class="hover:text-indigo-500 transition">YouTube</a>
+                <a href="https://www.instagram.com/tuftactics_1/" target="_blank" class="hover:text-indigo-500 transition">Instagram</a>
+                <a href="mailto:tuftactics1528@gmail.com" class="hover:text-indigo-500 transition">Support</a>
+            </div>
+            <a href="/terms" class="text-slate-500 hover:text-indigo-500 transition">Privacy Policy & Terms</a>
+        </div>
+    </footer>
+    <script>
+        async function toggleTheme() {
+            let body = document.body;
+            let btn = document.getElementById('theme-btn');
+            let newTheme = body.classList.contains('dark-mode') ? 'light' : 'dark';
+            if(newTheme === 'light') { body.classList.remove('dark-mode'); body.classList.add('light-mode'); if(btn) btn.innerText = '☀️'; }
+            else { body.classList.remove('light-mode'); body.classList.add('dark-mode'); if(btn) btn.innerText = '🌙'; }
+            try { await fetch('/api/set-theme', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ theme: newTheme }) }); } catch (err) { console.error("Failed to save theme:", err); }
+        }
+    </script>
+</body>
+</html>'''
+
+# 2. index.html
+index_html = '''{% extends "base.html" %}
+{% block title %}TufTactics - AI-Powered Mock Interviews & Career Practice{% endblock %}
+{% block content %}
+<div class="max-w-4xl mx-auto text-center py-8 sm:py-16">
+    <div class="inline-block mb-6 px-5 py-2 bg-indigo-500/10 border border-indigo-500/20 text-indigo-500 dark:text-indigo-400 text-xs font-bold tracking-widest uppercase rounded-full shadow-lg">⚡ Next-Gen AI Career & Interview Engine</div>
+    <h1 class="text-4xl sm:text-6xl lg:text-7xl font-extrabold tracking-tight mb-6 leading-tight">Master Your Dream Role With <span class="theme-gradient-text">Precision AI Practice</span></h1>
+    <p class="text-slate-600 dark:text-slate-300 text-base sm:text-lg lg:text-xl mb-6 max-w-2xl mx-auto leading-relaxed px-4">TufTactics equips aspirants and professionals with adaptive role-based mock tests, deep performance analytics, and dynamic interview simulations.</p>
+    <div class="mb-12 inline-block px-4 py-2 bg-amber-500/10 border border-amber-500/20 text-amber-500 dark:text-amber-400 text-xs font-medium rounded-2xl">⚠️ <strong>Note:</strong> Content is generated by AI. Evaluations and questions may contain minor inaccuracies; use as a guidance tool.</div>
+
+    <div class="flex justify-center gap-4 px-4"><a href="/mock-interview" class="w-full sm:w-auto px-10 py-4 theme-btn-bg font-bold rounded-2xl text-lg transition shadow-2xl flex items-center justify-center space-x-3 text-white"><span>Start Mock Interview 🚀</span><span>➔</span></a></div>
+
+    <div class="grid grid-cols-1 md:grid-cols-3 gap-6 mt-16 text-left px-4">
+        <div class="glass-card p-8 rounded-3xl transition hover:scale-[1.02]"><div class="w-12 h-12 rounded-2xl bg-indigo-500/10 flex items-center justify-center text-xl mb-4 text-indigo-500">🎯</div><h3 class="font-bold text-lg mb-2">Persona & Resume Tests</h3><p class="text-sm text-slate-500 dark:text-slate-400">Custom role-based mock tests and resume interviews tailored strictly to your career path to build real job readiness.</p></div>
+        <div class="glass-card p-8 rounded-3xl transition hover:scale-[1.02]"><div class="w-12 h-12 rounded-2xl bg-blue-500/10 flex items-center justify-center text-xl mb-4 text-blue-500">📈</div><h3 class="font-bold text-lg mb-2">Dashboard Progress Analytics</h3><p class="text-sm text-slate-500 dark:text-slate-400">Track your overall average growth percentage, test counts, and interview performance loops to systematically level up your skills.</p></div>
+        <div class="glass-card p-8 rounded-3xl transition hover:scale-[1.02]"><div class="w-12 h-12 rounded-2xl bg-purple-500/10 flex items-center justify-center text-xl mb-4 text-purple-500">🔒</div><h3 class="font-bold text-lg mb-2">Secure & Private</h3><p class="text-sm text-slate-500 dark:text-slate-400">Uploaded resumes are instantly deleted and Q&A history auto-clears after 24 hours to ensure 100% data privacy.</p></div>
+    </div>
+</div>
+{% endblock %}'''
+
+# 3. login.html
+login_html = '''{% extends "base.html" %}
+{% block title %}Sign In - TufTactics{% endblock %}
+{% block content %}
+<div class="w-full max-w-md mx-auto glass-card p-8 sm:p-10 rounded-3xl shadow-2xl">
+    <div class="text-center mb-8"><h2 class="text-2xl font-extrabold mb-2">Welcome Back</h2><p class="text-sm text-slate-500 dark:text-slate-400">Enter your credentials to access your portal</p></div>
+    {% if error %}<div class="mb-6 p-4 bg-rose-500/10 border border-rose-500/20 text-rose-600 dark:text-rose-300 text-xs rounded-2xl text-center font-semibold">{{ error }}</div>{% endif %}
+    <form method="POST" class="space-y-5">
+        <div><label class="block text-xs font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider mb-2">Email or Phone Number</label><input type="text" name="identifier" required class="w-full px-4 py-3.5 glass-input rounded-2xl focus:outline-none text-sm font-medium" placeholder="user@example.com or 9876543210"></div>
+        <div><div class="flex justify-between items-center mb-2"><label class="block text-xs font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider">4-Digit PIN Number</label><a href="/forgot-pin" class="text-xs text-indigo-600 dark:text-indigo-400 font-semibold hover:underline">Forgot PIN?</a></div><input type="password" name="pin" maxlength="4" pattern="\\d{4}" required oninput="this.value = this.value.replace(/[^0-9]/g, '').slice(0, 4);" class="w-full px-4 py-3.5 glass-input rounded-2xl focus:outline-none tracking-widest text-center text-lg font-bold" placeholder="••••"></div>
+        <button type="submit" class="w-full py-4 theme-btn-bg font-bold rounded-2xl transition shadow-xl mt-4 text-white">Access Dashboard ➔</button>
+    </form>
+    <p class="text-center text-sm text-slate-500 dark:text-slate-400 mt-8">Don't have an account? <a href="/signup" class="text-indigo-600 dark:text-indigo-400 font-bold hover:underline">Sign Up Now</a></p>
+</div>
+{% endblock %}'''
+
+# 4. signup.html
+signup_html = '''{% extends "base.html" %}
+{% block title %}Create Account - TufTactics{% endblock %}
+{% block content %}
+<div class="w-full max-w-md mx-auto glass-card p-8 sm:p-10 rounded-3xl shadow-2xl">
+    <div class="text-center mb-8"><h2 class="text-2xl font-extrabold mb-2">Create Account</h2><p class="text-sm text-slate-500 dark:text-slate-400">Register to start your daily career practice tests</p></div>
+    {% if error %}<div class="mb-6 p-4 bg-rose-500/10 border border-rose-500/20 text-rose-600 dark:text-rose-300 text-xs rounded-2xl text-center font-semibold">{{ error }}</div>{% endif %}
+    <form method="POST" class="space-y-4">
+        <div><label class="block text-xs font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider mb-2">Full Name</label><input type="text" name="name" required class="w-full px-4 py-3.5 glass-input rounded-2xl focus:outline-none text-sm font-medium" placeholder="Lokesh Krishan"></div>
+        <div><label class="block text-xs font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider mb-2">Email Address</label><input type="email" name="email" required class="w-full px-4 py-3.5 glass-input rounded-2xl focus:outline-none text-sm font-medium" placeholder="user@example.com"></div>
+        <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <div><label class="block text-xs font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider mb-2">Phone (10 Digits)</label><input type="tel" name="phone" minlength="10" maxlength="10" pattern="\\d{10}" required oninput="this.value = this.value.replace(/[^0-9]/g, '').slice(0, 10);" class="w-full px-4 py-3.5 glass-input rounded-2xl focus:outline-none text-sm font-medium" placeholder="9876543210"></div>
+            <div><label class="block text-xs font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider mb-2">Age</label><input type="number" name="age" min="10" max="100" required class="w-full px-4 py-3.5 glass-input rounded-2xl focus:outline-none text-sm font-medium" placeholder="22"></div>
+        </div>
+        <div><label class="block text-xs font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider mb-2">Create 4-Digit PIN Number</label><input type="password" name="pin" minlength="4" maxlength="4" pattern="\\d{4}" required oninput="this.value = this.value.replace(/[^0-9]/g, '').slice(0, 4);" class="w-full px-4 py-3.5 glass-input rounded-2xl focus:outline-none tracking-widest text-center text-lg font-bold" placeholder="••••"></div>
+        <button type="submit" class="w-full py-4 theme-btn-bg font-bold rounded-2xl transition shadow-xl mt-4 text-white">Register & Continue ➔</button>
+    </form>
+    <p class="text-center text-sm text-slate-500 dark:text-slate-400 mt-6">Already registered? <a href="/login" class="text-indigo-600 dark:text-indigo-400 font-bold hover:underline">Sign In</a></p>
+</div>
+{% endblock %}'''
+
+# 5. forgot_pin.html
+forgot_html = '''{% extends "base.html" %}
+{% block title %}Reset PIN - TufTactics{% endblock %}
+{% block content %}
+<div class="w-full max-w-md mx-auto glass-card p-8 sm:p-10 rounded-3xl shadow-2xl">
+    <div class="text-center mb-8"><h2 class="text-2xl font-extrabold mb-2">Reset 4-Digit PIN</h2><p class="text-sm text-slate-500 dark:text-slate-400">Verify your registered details to set a new PIN</p></div>
+    {% if error %}<div class="mb-6 p-4 bg-rose-500/10 border border-rose-500/20 text-rose-600 dark:text-rose-300 text-xs rounded-2xl text-center font-semibold">{{ error }}</div>{% endif %}
+    <form method="POST" class="space-y-4">
+        <div><label class="block text-xs font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider mb-2">Registered Email or Phone</label><input type="text" name="identifier" required class="w-full px-4 py-3.5 glass-input rounded-2xl focus:outline-none text-sm font-medium" placeholder="user@example.com or 9876543210"></div>
+        <div><label class="block text-xs font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider mb-2">Registered Full Name</label><input type="text" name="name" required class="w-full px-4 py-3.5 glass-input rounded-2xl focus:outline-none text-sm font-medium" placeholder="Lokesh Krishan"></div>
+        <div><label class="block text-xs font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider mb-2">New 4-Digit PIN</label><input type="password" name="new_pin" minlength="4" maxlength="4" pattern="\\d{4}" required oninput="this.value = this.value.replace(/[^0-9]/g, '').slice(0, 4);" class="w-full px-4 py-3.5 glass-input rounded-2xl focus:outline-none tracking-widest text-center text-lg font-bold" placeholder="••••"></div>
+        <button type="submit" class="w-full py-4 theme-btn-bg font-bold rounded-2xl transition shadow-xl mt-4 text-white">Update PIN ➔</button>
+    </form>
+    <p class="text-center text-sm text-slate-500 dark:text-slate-400 mt-6">Remembered your PIN? <a href="/login" class="text-indigo-600 dark:text-indigo-400 font-bold hover:underline">Sign In</a></p>
+</div>
+{% endblock %}'''
+
+# 6. dashboard.html
+dashboard_html = '''{% extends "base.html" %}
+{% block title %}User Dashboard - TufTactics{% endblock %}
+{% block content %}
+<div class="w-full max-w-4xl mx-auto glass-card p-8 sm:p-10 rounded-3xl shadow-2xl">
+    <div class="flex flex-col md:flex-row justify-between items-start md:items-center border-b pb-6 mb-8 gap-4 border-slate-200 dark:border-white/5">
+        <div><h1 class="text-2xl sm:text-3xl font-extrabold mb-1">Welcome, {{ user_name }}! ✨</h1><p class="text-sm text-slate-500 dark:text-slate-400">User Identification ID: <span class="font-mono text-indigo-600 dark:text-indigo-300 font-bold bg-indigo-500/10 px-3 py-1 rounded-xl border border-indigo-500/20">{{ user_id }}</span></p></div>
+        <div class="flex items-center space-x-3"><a href="/logout" class="px-4 py-2 bg-rose-500/10 border border-rose-500/20 text-rose-600 dark:text-rose-300 hover:bg-rose-500/20 text-xs font-bold rounded-2xl transition">Sign Out</a></div>
+    </div>
+
+    <div class="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
+        <div class="glass-card p-6 rounded-3xl border border-indigo-500/30 md:col-span-2 flex flex-col justify-between">
+            <div><h3 class="text-lg font-bold mb-1">📈 Overall Progress Score</h3><p class="text-xs text-slate-500 dark:text-slate-400 mb-4">Calculated from your average test & interview performances.</p></div>
+            <div class="flex items-center space-x-4">
+                <div class="text-3xl font-extrabold theme-gradient-text">{{ avg_score }}%</div>
+                <div class="w-full bg-black/20 h-3 rounded-full overflow-hidden"><div class="theme-btn-bg h-full rounded-full" style="width: {{ avg_score }}%;"></div></div>
+            </div>
+        </div>
+        <div class="glass-card p-6 rounded-3xl border border-indigo-500/30 flex flex-col justify-center text-center">
+            <p class="text-xs text-slate-400 uppercase font-bold tracking-wider mb-1">Total Tests & Interviews</p>
+            <p class="text-xl font-extrabold theme-gradient-text">{{ total_tests }} Tests | {{ total_interviews }} Interviews</p>
+        </div>
+    </div>
+
+    <div class="grid grid-cols-1 md:grid-cols-2 gap-6 mb-8">
+        <div class="glass-card p-8 rounded-3xl flex flex-col justify-between"><div><h3 class="text-xl font-bold mb-2">🎯 Take Mock Test</h3><p class="text-sm text-slate-500 dark:text-slate-400 mb-6">Configure your Persona and start your customized skill or academic test.</p></div><a href="/quiz" class="inline-block text-center px-6 py-4 theme-btn-bg font-bold text-sm rounded-2xl transition shadow-xl text-white">Configure Mock Test ➔</a></div>
+        <div class="glass-card p-8 rounded-3xl flex flex-col justify-between"><div><h3 class="text-xl font-bold mb-2">🚀 Launch Mock Interview</h3><p class="text-sm text-slate-500 dark:text-slate-400 mb-6">Upload resume & start your 30-Question corporate technical interview.</p></div><a href="/mock-interview" class="inline-block text-center px-6 py-4 theme-btn-bg font-bold text-sm rounded-2xl transition shadow-xl text-white">Start Mock Interview ➔</a></div>
+    </div>
+
+    <div class="glass-card p-6 sm:p-8 rounded-3xl">
+        <h3 class="text-lg font-bold mb-4">📊 Past Marksheets & Detailed Question Reviews</h3>
+        <p class="text-xs text-slate-400 mb-6">🔒 Note: Detailed question answers and explanations are automatically deleted after 24 hours for privacy, but your progress score is permanently retained.</p>
+        
+        {% if past_interviews %}
+        <div class="space-y-6 max-h-[600px] overflow-y-auto pr-2">
+            {% for item in past_interviews %}
+            <div class="glass-card p-6 rounded-2xl border border-indigo-500/20 space-y-4">
+                <div class="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-2 border-b pb-4 border-indigo-500/10">
+                    <div><span class="px-3 py-1 bg-indigo-500/10 text-indigo-400 text-xs font-bold rounded-full border border-indigo-500/20">{{ item.role }}</span><p class="text-xs text-slate-400 mt-2">Taken on: {{ item.timestamp }}</p></div>
+                    <div class="text-right"><span class="text-xl font-extrabold text-emerald-400">{{ item.score }}/{{ item.total }} ({{ item.percentage }}%)</span></div>
+                </div>
+                <p class="text-sm text-slate-300 bg-black/20 p-3 rounded-xl">💡 <strong>Performance Summary:</strong> {{ item.feedback_summary }}</p>
+                {% if item.review and not item.is_expired %}
+                <div class="space-y-3 mt-4">
+                    <h4 class="font-bold text-xs uppercase tracking-wider text-slate-400">Detailed Q&A Breakdown (Active for 24h):</h4>
+                    {% for rev in item.review %}
+                    <div class="glass-card p-4 rounded-xl border {{ 'border-emerald-500/30' if rev.is_correct else 'border-rose-500/30' }} text-xs space-y-1">
+                        <span class="font-bold text-indigo-400">[{{ rev.category }}]</span>
+                        <p class="font-semibold text-white">{{ rev.question }}</p>
+                        <p>Your Answer: <span class="{{ 'text-emerald-400 font-bold' if rev.is_correct else 'text-rose-400 font-bold' }}">{{ rev.user_ans }}</span></p>
+                        {% if not rev.is_correct %}<p>Correct Answer: <span class="text-emerald-400 font-bold">{{ rev.correct_ans }}</span></p>{% endif %}
+                        <p class="text-slate-400 mt-1">Explanation: {{ rev.explanation }}</p>
+                    </div>
+                    {% endfor %}
+                </div>
+                {% else %}
+                <p class="text-xs text-amber-400/80 bg-amber-500/10 p-3 rounded-xl">⚠️ Detailed Q&A review expired after 24 hours for privacy.</p>
+                {% endif %}
+            </div>
+            {% endfor %}
+        </div>
+        {% else %}<p class="text-sm text-slate-400">No mock tests or interviews taken yet. Start practicing above!</p>{% endif %}
+    </div>
+</div>
+{% endblock %}'''
+
+# 7. about.html
+about_html = '''{% extends "base.html" %}
+{% block title %}About Us - TufTactics{% endblock %}
+{% block content %}
+<div class="max-w-3xl mx-auto text-center py-8 sm:py-16">
+    <h1 class="text-3xl sm:text-4xl font-extrabold mb-6">About TufTactics</h1>
+    <p class="text-slate-600 dark:text-slate-300 text-base sm:text-lg leading-relaxed mb-10 px-4">
+        TufTactics is an advanced AI-powered career growth and mock interview practice platform. We empower job aspirants and professionals by providing daily role-based skill assessments, targeted interview questions, and comprehensive performance feedback loops.
+    </p>
+    <div class="glass-card p-8 rounded-3xl text-left space-y-4 mx-4 shadow-2xl">
+        <h3 class="text-xl font-bold text-indigo-600 dark:text-indigo-400 mb-2">Official Career & Support Channels</h3>
+        <p class="text-sm text-slate-500 dark:text-slate-300">📧 Support Email: <a href="mailto:tuftactics1528@gmail.com" class="text-indigo-600 dark:text-indigo-400 hover:underline font-semibold">tuftactics1528@gmail.com</a></p>
+        <p class="text-sm text-slate-500 dark:text-slate-300">📺 YouTube Channel: <a href="https://www.youtube.com/@TufTactics" target="_blank" class="text-indigo-600 dark:text-indigo-400 hover:underline font-semibold">youtube.com/@TufTactics</a></p>
+        <p class="text-sm text-slate-500 dark:text-slate-300">📷 Instagram Community: <a href="https://www.instagram.com/tuftactics_1/" target="_blank" class="text-purple-600 dark:text-purple-400 hover:underline font-semibold">instagram.com/tuftactics_1</a></p>
+    </div>
+</div>
+{% endblock %}'''
+
+# 8. contact.html
+contact_html = '''{% extends "base.html" %}
+{% block title %}Contact & Reviews - TufTactics{% endblock %}
+{% block content %}
+<div class="w-full max-w-2xl mx-auto glass-card p-8 sm:p-10 rounded-3xl shadow-2xl">
+    <div class="text-center mb-8">
+        <h2 class="text-2xl sm:text-3xl font-extrabold mb-2">Get in Touch, Ratings & Reviews</h2>
+        <p class="text-sm text-slate-500 dark:text-slate-400">Share your feedback, report bugs, request features, or drop a star rating & review!</p>
+    </div>
+    {% if success_msg %}
+    <div class="mb-6 p-4 bg-emerald-500/10 border border-emerald-500/20 text-emerald-600 dark:text-emerald-300 text-sm rounded-2xl text-center font-semibold">
+        {{ success_msg }}
+    </div>
+    {% endif %}
+    <div class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-8">
+        <a href="mailto:tuftactics1528@gmail.com" class="glass-card p-5 rounded-2xl text-center hover:scale-[1.02] transition flex flex-col items-center justify-center">
+            <svg class="w-7 h-7 mb-2 text-indigo-500" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z"/></svg>
+            <h4 class="font-bold text-sm mb-1">Email Support</h4>
+            <p class="text-xs text-slate-500 dark:text-slate-400 truncate w-full">tuftactics1528@gmail.com</p>
+        </a>
+        <a href="https://www.youtube.com/@TufTactics" target="_blank" class="glass-card p-5 rounded-2xl text-center hover:scale-[1.02] transition flex flex-col items-center justify-center">
+            <svg class="w-7 h-7 mb-2 text-rose-500" fill="currentColor" viewBox="0 0 24 24"><path d="M23.498 6.186a3.016 3.016 0 0 0-2.122-2.136C19.505 3.545 12 3.545 12 3.545s-7.505 0-9.377.505A3.017 3.017 0 0 0 .502 6.186C0 8.07 0 12 0 12s0 3.93.502 5.814a3.016 3.016 0 0 0 2.122 2.136c1.871.505 9.376.505 9.376.505s7.505 0 9.377-.505a3.015 3.015 0 0 0 2.122-2.136C24 15.93 24 12 24 12s0-3.93-.502-5.814zM9.545 15.568V8.432L15.818 12l-6.273 3.568z"/></svg>
+            <h4 class="font-bold text-sm mb-1">YouTube</h4>
+            <p class="text-xs text-slate-500 dark:text-slate-400">@TufTactics</p>
+        </a>
+        <a href="https://www.instagram.com/tuftactics_1/" target="_blank" class="glass-card p-5 rounded-2xl text-center hover:scale-[1.02] transition flex flex-col items-center justify-center">
+            <svg class="w-7 h-7 mb-2 text-pink-500" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><rect width="20" height="20" x="2" y="2" rx="5" ry="5"/><path d="M16 11.37A4 4 0 1 1 12.63 8 4 4 0 0 1 16 11.37z"/><line x1="17.5" x2="17.51" y1="6.5" y2="6.5"/></svg>
+            <h4 class="font-bold text-sm mb-1">Instagram</h4>
+            <p class="text-xs text-slate-500 dark:text-slate-400">@tuftactics_1</p>
+        </a>
+    </div>
+    <div class="glass-card p-6 sm:p-8 rounded-3xl">
+        <h3 class="text-lg font-extrabold mb-4 flex items-center space-x-2"><span>⭐ Submit Review, Bug Report or Feedback</span></h3>
+        <form method="POST" class="space-y-4">
+            <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div><label class="block text-xs font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider mb-2">Your Name</label><input type="text" name="name" required class="w-full px-4 py-3 glass-input rounded-2xl focus:outline-none text-sm font-medium" placeholder="Lokesh Krishan"></div>
+                <div><label class="block text-xs font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider mb-2">Your Email</label><input type="email" name="email" required class="w-full px-4 py-3 glass-input rounded-2xl focus:outline-none text-sm font-medium" placeholder="user@example.com"></div>
+            </div>
+            <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div><label class="block text-xs font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider mb-2">Category</label><select name="category" class="w-full px-4 py-3 glass-input rounded-2xl focus:outline-none text-sm font-medium" required><option value="Review & Rating">⭐ Review & Rating</option><option value="General Feedback">💬 General Feedback</option><option value="Bug Report">🐛 Bug Report</option></select></div>
+                <div><label class="block text-xs font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider mb-2">Star Rating</label><select name="rating" class="w-full px-4 py-3 glass-input rounded-2xl focus:outline-none text-sm font-medium"><option value="5">⭐⭐⭐⭐⭐ (5/5)</option><option value="4">⭐⭐⭐⭐ (4/5)</option><option value="3">⭐⭐⭐ (3/5)</option></select></div>
+            </div>
+            <div><label class="block text-xs font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider mb-2">Message</label><textarea name="message" rows="4" required class="w-full px-4 py-3 glass-input rounded-2xl focus:outline-none text-sm font-medium resize-none" placeholder="Write your review or feedback..."></textarea></div>
+            <button type="submit" class="w-full py-4 theme-btn-bg font-bold rounded-2xl transition shadow-xl text-white">Submit Now ➔</button>
+        </form>
+    </div>
+</div>
+{% endblock %}'''
+
+# 9. terms.html
+terms_html = '''{% extends "base.html" %}
+{% block title %}Privacy Policy & Terms - TufTactics{% endblock %}
+{% block content %}
+<div class="max-w-3xl mx-auto glass-card p-8 sm:p-10 rounded-3xl shadow-2xl text-left space-y-6">
+    <div class="border-b pb-4 border-slate-200 dark:border-white/5"><h1 class="text-2xl sm:text-3xl font-extrabold mb-2">Privacy Policy & Terms of Service</h1><p class="text-xs text-slate-500 dark:text-slate-400">Effective Date: September 2026 | TufTactics Platform</p></div>
+    <div><h3 class="text-lg font-bold text-indigo-600 dark:text-indigo-400 mb-2">1. Introduction & Platform Scope</h3><p class="text-sm text-slate-600 dark:text-slate-300 leading-relaxed">TufTactics is an AI-powered mock interview and professional skill practice platform.</p></div>
+    <div><h3 class="text-lg font-bold text-indigo-600 dark:text-indigo-400 mb-2">2. User Registration & Data Privacy</h3><p class="text-sm text-slate-600 dark:text-slate-300 leading-relaxed">Users register with verified personal information and secure 4-digit PIN authentication.</p></div>
+    <div><h3 class="text-lg font-bold text-indigo-600 dark:text-indigo-400 mb-2">3. Ad-Supported Free Practice</h3><p class="text-sm text-slate-600 dark:text-slate-300 leading-relaxed">Platform displays standard advertisements to keep practice free for aspirants.</p></div>
+</div>
+{% endblock %}'''
+
+# 10. mock_setup.html
+mock_setup_html = '''{% extends "base.html" %}
+{% block title %}Mock Interview Setup - TufTactics{% endblock %}
+{% block content %}
+<div class="w-full max-w-xl mx-auto glass-card p-8 sm:p-10 rounded-3xl shadow-2xl">
+    <div class="text-center mb-8"><h2 class="text-2xl sm:text-3xl font-extrabold theme-gradient-text mb-2">🚀 Corporate Mock Interview</h2><p class="text-xs sm:text-sm text-slate-500 dark:text-slate-400">Upload your resume & enter target role for a 30-Question Assessment.</p></div>
+    {% if error %}
+    <div class="mb-6 p-6 bg-rose-500/10 border border-rose-500/30 text-rose-300 text-sm rounded-3xl text-center font-bold space-y-4">
+        <p>{{ error }}</p>
+        <a href="/dashboard" class="inline-block px-6 py-3 theme-btn-bg text-white rounded-2xl text-xs font-bold transition shadow-lg">Return to Dashboard ➔</a>
+    </div>
+    {% else %}
+    <form method="POST" enctype="multipart/form-data" class="space-y-6">
+        <div><label class="block text-xs font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider mb-2">Target Job Role / Title</label><input type="text" name="target_role" required class="w-full px-4 py-3.5 glass-input rounded-2xl focus:outline-none text-sm font-medium" placeholder="e.g. Senior Python Developer"></div>
+        <div><label class="block text-xs font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider mb-2">Upload Resume (PDF or DOCX)</label><input type="file" name="resume" accept=".pdf,.docx" required class="w-full px-4 py-3 glass-input rounded-2xl focus:outline-none text-sm font-medium"></div>
+        <button type="submit" class="w-full py-4 theme-btn-bg font-bold rounded-2xl transition shadow-xl text-white">Generate 30-Q Interview ➔</button>
+    </form>
+    {% endif %}
+</div>
+{% endblock %}'''
+
+# 11. mock_live.html
+mock_live_html = '''{% extends "base.html" %}
+{% block title %}Mock Interview Live - TufTactics{% endblock %}
+{% block content %}
+<div class="w-full max-w-2xl mx-auto glass-card p-8 sm:p-10 rounded-3xl shadow-2xl">
+    <div class="flex flex-col sm:flex-row justify-between items-center mb-6 gap-4 border-b pb-4 border-indigo-500/10">
+        <div><span class="px-3 py-1 bg-indigo-500/10 text-indigo-400 text-xs font-bold rounded-full border border-indigo-500/20">{{ question.category }}</span><h1 class="text-lg font-extrabold mt-2">Role: {{ role }}</h1></div>
+        <div class="px-4 py-2 bg-indigo-500/10 border border-indigo-500/20 text-indigo-400 text-xs rounded-2xl font-mono font-bold">Question {{ index }} of {{ total }}</div>
+    </div>
+    <form method="POST" class="space-y-6">
+        <h3 class="text-base sm:text-lg font-bold mb-6 leading-relaxed">{{ question.question }}</h3>
+        <div class="space-y-3.5 mb-8">
+            {% for opt in question.options %}
+            <label class="glass-card flex items-center p-4 rounded-2xl border border-transparent hover:border-indigo-500/40 cursor-pointer transition font-medium text-sm sm:text-base">
+                <input type="radio" name="answer" value="{{ opt }}" required class="w-4 h-4 text-indigo-600 focus:ring-indigo-500 mr-3"><span>{{ opt }}</span>
+            </label>
+            {% endfor %}
+        </div>
+        <button type="submit" class="w-full py-4 theme-btn-bg font-bold rounded-2xl transition shadow-xl text-white">{% if index == total %}Finish & View Report ➔{% else %}Next Question ➔{% endif %}</button>
+    </form>
+</div>
+{% endblock %}'''
+
+# 12. quiz_setup.html
+quiz_setup_html = '''{% extends "base.html" %}
+{% block title %}Configure Mock Test - TufTactics{% endblock %}
+{% block content %}
+<div class="w-full max-w-xl mx-auto glass-card p-8 sm:p-10 rounded-3xl shadow-2xl">
+    <div class="text-center mb-8"><h2 class="text-2xl sm:text-3xl font-extrabold theme-gradient-text mb-1">🎯 Configure Your Mock Test</h2><p class="text-xs text-slate-500 dark:text-slate-400">Select your learning persona to customize questions</p></div>
+    
+    {% if error %}
+    <div class="p-6 bg-rose-500/10 border border-rose-500/30 text-rose-300 text-sm rounded-3xl text-center font-bold space-y-4">
+        <p>{{ error }}</p>
+        <a href="/dashboard" class="inline-block px-6 py-3 theme-btn-bg text-white rounded-2xl text-xs font-bold transition shadow-lg">Return to Dashboard ➔</a>
+    </div>
+    {% else %}
+    <form action="/quiz-live" method="GET" onsubmit="return validateQuizForm(event)" class="space-y-5">
+        <div>
+            <label class="block text-xs font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider mb-2">Select User Persona</label>
+            <select name="persona" id="persona-select" onchange="togglePersonaFields()" class="w-full px-4 py-3.5 glass-input rounded-2xl focus:outline-none text-sm font-medium" required>
+                <option value="" disabled selected hidden>-- Select Persona --</option>
+                <option value="Student">Student</option>
+                <option value="Aspirant">Aspirant</option>
+                <option value="Job Seeker">Job Seeker</option>
+                <option value="Just Learning">Just Learning</option>
+            </select>
+        </div>
+        <div id="dynamic-fields" class="space-y-5"></div>
+        <button type="submit" id="submit-btn" class="w-full py-4 theme-btn-bg font-bold rounded-2xl transition shadow-xl mt-6 text-white">Start Mock Test ➔</button>
+    </form>
+    {% endif %}
+</div>
+<script>
+    const ugProfessions = ["Engineering", "Medicine & Healthcare", "Finance & Accounting", "Arts & Science", "Law", "Management", "Computer Applications", "Architecture", "Agriculture", "Mass Communication", "Others"];
+    const pgProfessions = ["Engineering (M.E / M.Tech)", "Medicine (MD / MS)", "Management (MBA)", "Arts & Science (M.Sc / M.A)", "Computer Applications (MCA)", "Law (LL.M)", "Others"];
+    const departmentsMap = {
+        "Engineering": ["Civil Engineering", "Mechanical Engineering", "Automobile Engineering", "Electrical & Electronics (EEE)", "Electronics & Communication (ECE)", "Computer Science & Engineering", "Information Technology", "Chemical Engineering", "Aerospace Engineering", "Biotechnology", "Others"],
+        "Medicine & Healthcare": ["MBBS", "BDS", "BAMS", "BHMS", "Nursing", "Pharmacy", "Radiology", "Others"],
+        "Finance & Accounting": ["Chartered Accountancy", "Cost Accountancy", "Banking & Insurance", "Corporate Finance", "Taxation", "Others"],
+        "Arts & Science": ["English Literature", "History", "Political Science", "Psychology", "Sociology", "Mathematics", "Physics", "Chemistry", "Computer Science", "Economics", "Others"],
+        "Law": ["LL.B / Corporate Law", "Criminal Law", "Cyber Law", "IPR Law", "Others"],
+        "Management": ["Marketing Management", "Human Resources", "Operations Management", "Business Analytics", "International Business", "Others"],
+        "Computer Applications": ["BCA", "MCA", "Software Development", "Cyber Security", "Others"],
+        "Others": ["Custom Department"]
+    };
+    const aspirantExamsMap = {
+        "NEET": ["Physics", "Chemistry", "Botany", "Zoology", "Others"],
+        "JEE": ["Physics", "Chemistry", "Mathematics", "Others"],
+        "TNPSC Group Exams": ["Group 1", "Group 2 / 2A", "Group 4 & VAO", "Others"],
+        "UPSC Civil Services": ["General Studies Paper 1", "CSAT", "Optional Subject", "Others"],
+        "Others": ["Custom Exam & Subject"]
+    };
+    const jobRolesMap = {
+        "Software Development": ["Python Developer", "Java Developer", "Full Stack Developer", "Frontend Developer", "Backend Developer", "DevOps Engineer", "QA Automation Engineer", "Mobile App Developer", "iOS Developer", "Android Developer", "Cloud Solutions Architect", "Cyber Security Analyst", "Blockchain Developer", "Systems Engineer", "Software Architect", "Others"],
+        "Data & AI": ["Data Analyst", "Data Scientist", "Machine Learning Engineer", "AI Engineer", "Business Intelligence (BI) Analyst", "Big Data Engineer", "Data Engineer", "Computer Vision Engineer", "NLP Engineer", "Deep Learning Specialist", "Others"],
+        "Core Engineering & Manufacturing": ["Mechanical Design Engineer", "Civil Structural Engineer", "Automobile Engineer", "Electrical Power Engineer", "Electronics Hardware Engineer", "Aerospace Engineer", "Chemical Process Engineer", "CAD / CAM Engineer", "QA / QC Engineer", "Production Manager", "Robotics Engineer", "Others"],
+        "Finance & Accounting": ["Accounts Executive", "Financial Analyst", "Tax Consultant", "Senior Auditor", "Payroll Specialist", "Investment Banking Analyst", "Risk Management Specialist", "Corporate Finance Manager", "Others"],
+        "Management, HR & Operations": ["HR Executive / Recruiter", "Project Manager", "Product Manager", "Business Development Manager", "Operations Executive", "Supply Chain Manager", "Logistics Coordinator", "Scrum Master", "Others"],
+        "Healthcare & Medical": ["General Physician", "Biomedical Engineer", "Clinical Research Associate", "Pharmacist", "Healthcare Administrator", "Nursing Supervisor", "Others"],
+        "Creative, Media & Design": ["UI/UX Designer", "Graphic Designer", "Video Editor & Animator", "Content Writer", "Interior Designer", "Architect", "Social Media Manager", "Creative Director", "Others"],
+        "Others": ["Custom Role"]
+    };
+
+    function togglePersonaFields() {
+        let persona = document.getElementById('persona-select').value;
+        let container = document.getElementById('dynamic-fields');
+        if(!container) return;
+        container.innerHTML = '';
+        if(persona === 'Student') {
+            container.innerHTML = `
+                <div><label class="block text-xs font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider mb-2">Degree Level</label><select name="edu_level" id="edu-level" onchange="updateProfessions()" class="w-full px-4 py-3.5 glass-input rounded-2xl focus:outline-none text-sm font-medium" required><option value="" disabled selected hidden>-- Select Degree Level --</option><option value="UG">Undergraduate (UG)</option><option value="PG">Postgraduate (PG)</option></select></div>
+                <div><label class="block text-xs font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider mb-2">Profession / Stream</label><select name="profession" id="profession-select" onchange="updateDepartments()" class="w-full px-4 py-3.5 glass-input rounded-2xl focus:outline-none text-sm font-medium" required><option value="" disabled selected hidden>-- Select Profession --</option></select></div>
+                <div id="custom-prof-box" class="hidden"><label class="block text-xs font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider mb-2">Specify Custom Profession</label><input type="text" id="custom-prof-input" class="w-full px-4 py-3.5 glass-input rounded-2xl focus:outline-none text-sm font-medium" placeholder="Enter custom profession..."></div>
+                
+                <div><label class="block text-xs font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider mb-2">Core Department / Branch</label><select name="department" id="department-select" onchange="checkCustomDept(this)" class="w-full px-4 py-3.5 glass-input rounded-2xl focus:outline-none text-sm font-medium" required><option value="" disabled selected hidden>-- Select Department --</option></select></div>
+                <div id="custom-dept-box" class="hidden"><label class="block text-xs font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider mb-2">Specify Custom Department (e.g. ECE / EEE / AI-DS)</label><input type="text" id="custom-dept-input" class="w-full px-4 py-3.5 glass-input rounded-2xl focus:outline-none text-sm font-medium" placeholder="Enter your department/branch name..."></div>
+                
+                <div class="grid grid-cols-2 gap-3">
+                    <div><label class="block text-xs font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider mb-2">Year of Study</label><select name="year" id="year-select" onchange="updateSemesters()" class="w-full px-4 py-3.5 glass-input rounded-2xl focus:outline-none text-sm font-medium" required><option value="" disabled selected hidden>-- Select Year --</option><option value="1st Year">1st Year</option><option value="2nd Year">2nd Year</option><option value="3rd Year">3rd Year</option><option value="4th Year / Final">4th Year / Final</option></select></div>
+                    <div><label class="block text-xs font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider mb-2">Semester</label><select name="semester" id="semester-select" class="w-full px-4 py-3.5 glass-input rounded-2xl focus:outline-none text-sm font-medium" required><option value="" disabled selected hidden>-- Select Sem --</option></select></div>
+                </div>
+                <div><label class="block text-xs font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider mb-2">Subject Name</label><input type="text" name="subject" required class="w-full px-4 py-3.5 glass-input rounded-2xl focus:outline-none text-sm font-medium" placeholder="e.g. Digital Signal Processing"></div>
+                <div><label class="block text-xs font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider mb-2">Question Count</label><select name="count" class="w-full px-4 py-3.5 glass-input rounded-2xl focus:outline-none text-sm font-medium" required><option value="10">10 Questions</option><option value="20">20 Questions</option><option value="50">50 Questions</option></select></div>
+            `;
+            updateProfessions(); updateSemesters();
+        } else if(persona === 'Aspirant') {
+            container.innerHTML = `
+                <div><label class="block text-xs font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider mb-2">Select Major Exam</label><select name="exam" id="exam-select" onchange="updateAspirantSubjects()" class="w-full px-4 py-3.5 glass-input rounded-2xl focus:outline-none text-sm font-medium" required><option value="" disabled selected hidden>-- Select Exam --</option><option value="NEET">NEET</option><option value="JEE">JEE</option><option value="TNPSC Group Exams">TNPSC Group Exams</option><option value="UPSC Civil Services">UPSC Civil Services</option><option value="Others">Others</option></select></div>
+                <div id="custom-exam-box" class="hidden"><label class="block text-xs font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider mb-2">Specify Custom Exam</label><input type="text" id="custom-exam-input" class="w-full px-4 py-3.5 glass-input rounded-2xl focus:outline-none text-sm font-medium" placeholder="Enter custom exam name..."></div>
+                
+                <div><label class="block text-xs font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider mb-2">Exam Subject / Group</label><select name="exam_subject" id="exam-subject-select" onchange="checkCustomExamSub(this)" class="w-full px-4 py-3.5 glass-input rounded-2xl focus:outline-none text-sm font-medium" required><option value="" disabled selected hidden>-- Select Subject / Group --</option></select></div>
+                <div id="custom-exam-sub-box" class="hidden"><label class="block text-xs font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider mb-2">Specify Custom Subject</label><input type="text" id="custom-exam-sub-input" class="w-full px-4 py-3.5 glass-input rounded-2xl focus:outline-none text-sm font-medium" placeholder="Enter custom subject..."></div>
+                
+                <input type="hidden" name="subject" id="aspirant-hidden-subject">
+                <div class="p-3 bg-indigo-500/10 border border-indigo-500/20 rounded-2xl text-xs text-indigo-400 text-center font-bold">📌 Aspirant exams strictly include 50 comprehensive questions.</div>
+                <input type="hidden" name="count" value="50">
+            `;
+            updateAspirantSubjects();
+        } else if(persona === 'Job Seeker') {
+            container.innerHTML = `
+                <div><label class="block text-xs font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider mb-2">Candidate Status</label><select name="exp_status" id="exp-status" onchange="toggleJobFields()" class="w-full px-4 py-3.5 glass-input rounded-2xl focus:outline-none text-sm font-medium" required><option value="" disabled selected hidden>-- Select Status --</option><option value="Fresher">Fresher</option><option value="Experienced">Experienced</option></select></div>
+                <div id="exp-duration-box" class="hidden">
+                    <label class="block text-xs font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider mb-2">Experience Duration</label>
+                    <div class="grid grid-cols-2 gap-3">
+                        <select name="exp_years" class="w-full px-4 py-3.5 glass-input rounded-2xl focus:outline-none text-sm font-medium"><option value="0">0 Years</option><option value="1">1 Year</option><option value="2">2 Years</option><option value="3">3 Years</option><option value="5">5 Years</option><option value="10">10+ Years</option></select>
+                        <select name="exp_months" class="w-full px-4 py-3.5 glass-input rounded-2xl focus:outline-none text-sm font-medium"><option value="0">0 Months</option><option value="3">3 Months</option><option value="6">6 Months</option><option value="9">9 Months</option></select>
+                    </div>
+                </div>
+                <div>
+                    <label class="block text-xs font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider mb-2">Industry Sector</label>
+                    <select name="industry" id="industry-select" onchange="updateJobRoles()" class="w-full px-4 py-3.5 glass-input rounded-2xl focus:outline-none text-sm font-medium" required>
+                        <option value="" disabled selected hidden>-- Select Sector --</option>
+                        <option value="Software Development">Software Development</option>
+                        <option value="Data & AI">Data & AI</option>
+                        <option value="Core Engineering & Manufacturing">Core Engineering & Manufacturing</option>
+                        <option value="Finance & Accounting">Finance & Accounting</option>
+                        <option value="Management, HR & Operations">Management, HR & Operations</option>
+                        <option value="Healthcare & Medical">Healthcare & Medical</option>
+                        <option value="Creative, Media & Design">Creative, Media & Design</option>
+                        <option value="Others">Others</option>
+                    </select>
+                </div>
+                <div id="custom-ind-box" class="hidden"><label class="block text-xs font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider mb-2">Specify Custom Industry Sector</label><input type="text" id="custom-ind-input" class="w-full px-4 py-3.5 glass-input rounded-2xl focus:outline-none text-sm font-medium" placeholder="Enter industry sector..."></div>
+                
+                <div>
+                    <label class="block text-xs font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider mb-2">Target Job Role</label>
+                    <select name="job_role" id="job-role-select" onchange="checkCustomRole(this)" class="w-full px-4 py-3.5 glass-input rounded-2xl focus:outline-none text-sm font-medium" required>
+                        <option value="" disabled selected hidden>-- Select Role --</option>
+                    </select>
+                </div>
+                <div id="custom-role-box" class="hidden"><label class="block text-xs font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider mb-2">Specify Custom Job Role</label><input type="text" id="custom-role-input" class="w-full px-4 py-3.5 glass-input rounded-2xl focus:outline-none text-sm font-medium" placeholder="Enter target job role..."></div>
+                
+                <input type="hidden" name="subject" id="hidden-subject-input">
+                <div><label class="block text-xs font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider mb-2">Question Count</label><select name="count" class="w-full px-4 py-3.5 glass-input rounded-2xl focus:outline-none text-sm font-medium" required><option value="10">10 Questions</option><option value="20">20 Questions</option><option value="50">50 Questions</option></select></div>
+            `;
+            updateJobRoles();
+        } else {
+            container.innerHTML = `
+                <div><label class="block text-xs font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider mb-2">Casual Topic / Skill</label><input type="text" name="subject" required class="w-full px-4 py-3.5 glass-input rounded-2xl focus:outline-none text-sm font-medium" placeholder="e.g. General Knowledge"></div>
+                <div><label class="block text-xs font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider mb-2">Question Count</label><select name="count" class="w-full px-4 py-3.5 glass-input rounded-2xl focus:outline-none text-sm font-medium" required><option value="10">10 Questions</option><option value="20">20 Questions</option><option value="50">50 Questions</option></select></div>
+            `;
+        }
+    }
+
+    function updateProfessions() {
+        let level = document.getElementById('edu-level'); if(!level) return;
+        let profSelect = document.getElementById('profession-select'); profSelect.innerHTML = '<option value="" disabled selected hidden>-- Select Profession --</option>';
+        (level.value === 'UG' ? ugProfessions : pgProfessions).forEach(p => { let opt = document.createElement('option'); opt.value = p; opt.textContent = p; profSelect.appendChild(opt); });
+        updateDepartments();
+    }
+    function updateDepartments() {
+        let prof = document.getElementById('profession-select'); if(!prof) return;
+        let deptSelect = document.getElementById('department-select'); deptSelect.innerHTML = '<option value="" disabled selected hidden>-- Select Department --</option>';
+        let customProfBox = document.getElementById('custom-prof-box');
+        if(prof.value === 'Others') { customProfBox.classList.remove('hidden'); } else { customProfBox.classList.add('hidden'); }
+        (departmentsMap[prof.value] || ["General Department"]).forEach(d => { let opt = document.createElement('option'); opt.value = d; opt.textContent = d; deptSelect.appendChild(opt); });
+    }
+    function checkCustomDept(selectEl) {
+        let box = document.getElementById('custom-dept-box');
+        if(selectEl.value === 'Others') { box.classList.remove('hidden'); } else { box.classList.add('hidden'); }
+    }
+    function updateAspirantSubjects() {
+        let exam = document.getElementById('exam-select'); if(!exam) return;
+        let subSelect = document.getElementById('exam-subject-select'); subSelect.innerHTML = '<option value="" disabled selected hidden>-- Select Subject / Group --</option>';
+        let customExamBox = document.getElementById('custom-exam-box');
+        if(exam.value === 'Others') { customExamBox.classList.remove('hidden'); } else { customExamBox.classList.add('hidden'); }
+        (aspirantExamsMap[exam.value] || ["General Studies"]).forEach(s => { let opt = document.createElement('option'); opt.value = s; opt.textContent = s; subSelect.appendChild(opt); });
+        checkCustomExamSub(subSelect);
+    }
+    function checkCustomExamSub(selectEl) {
+        let box = document.getElementById('custom-exam-sub-box');
+        if(selectEl.value === 'Others') { box.classList.remove('hidden'); } else { box.classList.add('hidden'); }
+    }
+    function updateSemesters() {
+        let year = document.getElementById('year-select'); if(!year) return;
+        let semSelect = document.getElementById('semester-select'); semSelect.innerHTML = '<option value="" disabled selected hidden>-- Select Sem --</option>';
+        (year.value === '1st Year' ? ["Semester 1", "Semester 2"] : year.value === '2nd Year' ? ["Semester 3", "Semester 4"] : year.value === '3rd Year' ? ["Semester 5", "Semester 6"] : ["Semester 7", "Semester 8"]).forEach(s => { let opt = document.createElement('option'); opt.value = s; opt.textContent = s; semSelect.appendChild(opt); });
+    }
+    function updateJobRoles() {
+        let ind = document.getElementById('industry-select'); if(!ind) return;
+        let roleSelect = document.getElementById('job-role-select'); roleSelect.innerHTML = '<option value="" disabled selected hidden>-- Select Role --</option>';
+        let customIndBox = document.getElementById('custom-ind-box');
+        if(ind.value === 'Others') { customIndBox.classList.remove('hidden'); } else { customIndBox.classList.add('hidden'); }
+        (jobRolesMap[ind.value] || ["General Role"]).forEach(r => { let opt = document.createElement('option'); opt.value = r; opt.textContent = r; roleSelect.appendChild(opt); });
+    }
+    function checkCustomRole(selectEl) {
+        let box = document.getElementById('custom-role-box');
+        if(selectEl.value === 'Others') { box.classList.remove('hidden'); } else { box.classList.add('hidden'); }
+    }
+    function toggleJobFields() { let status = document.getElementById('exp-status'); if(!status) return; let box = document.getElementById('exp-duration-box'); if(status.value === 'Experienced') box.classList.remove('hidden'); else box.classList.add('hidden'); }
+    
+    function validateQuizForm(event) {
+        let persona = document.getElementById('persona-select').value;
+        if(persona === 'Job Seeker') {
+            let roleSelect = document.getElementById('job-role-select').value;
+            let hiddenSub = document.getElementById('hidden-subject-input');
+            if(roleSelect === 'Others') {
+                let customVal = document.getElementById('custom-role-input').value.trim();
+                if(!customVal) { alert("Please specify your custom job role!"); event.preventDefault(); return false; }
+                hiddenSub.value = customVal;
+            } else {
+                hiddenSub.value = roleSelect;
+            }
+        } else if(persona === 'Aspirant') {
+            let examSelect = document.getElementById('exam-select').value;
+            let subSelect = document.getElementById('exam-subject-select').value;
+            let hiddenSub = document.getElementById('aspirant-hidden-subject');
+            let finalExamName = (examSelect === 'Others') ? document.getElementById('custom-exam-input').value.trim() : examSelect;
+            let finalSubName = (subSelect === 'Others') ? document.getElementById('custom-exam-sub-input').value.trim() : subSelect;
+            
+            if(examSelect === 'Others' && !finalExamName) { alert("Please specify your custom exam name!"); event.preventDefault(); return false; }
+            if(subSelect === 'Others' && !finalSubName) { alert("Please specify your custom subject!"); event.preventDefault(); return false; }
+            
+            hiddenSub.value = `${finalExamName} - ${finalSubName}`;
+        }
+        return true;
+    }
+</script>
+{% endblock %}'''
+
+# 13. quiz.html with original English option mapping for translated evaluations
+quiz_html = '''{% extends "base.html" %}
+{% block title %}Mock Test - TufTactics{% endblock %}
+{% block content %}
+<div class="w-full max-w-2xl mx-auto glass-card p-8 sm:p-10 rounded-3xl shadow-2xl">
+    <div class="flex flex-col sm:flex-row justify-between items-center mb-6 gap-4">
+        <div><h1 class="text-xl font-extrabold theme-gradient-text">🔥 {{ persona }} Assessment</h1><p class="text-xs text-slate-500 dark:text-slate-400 mt-1">Focus Area: <span class="text-slate-800 dark:text-slate-200 font-semibold">{{ subject }}</span></p></div>
+        <div class="flex items-center space-x-2">
+            <div class="relative">
+                <button type="button" onclick="toggleLangMenu('quiz')" id="lang-btn-quiz" class="px-3 py-1.5 glass-input text-xs font-bold rounded-xl flex items-center space-x-2 hover:border-indigo-500"><span>🌐 <span id="current-lang-quiz">English (Original)</span></span><span>▼</span></button>
+                <div id="lang-dropdown-quiz" class="hidden absolute right-0 mt-2 w-44 glass-card rounded-2xl shadow-2xl z-50 border border-indigo-500/30 overflow-hidden py-1">
+                    <button type="button" onclick="selectQuizLang('en', 'English (Original)')" class="w-full text-left px-4 py-2.5 text-xs font-bold hover:bg-indigo-500/20 transition">English (Original)</button>
+                    <button type="button" onclick="selectQuizLang('ta', 'தமிழ் (Tamil)')" class="w-full text-left px-4 py-2.5 text-xs font-medium hover:bg-indigo-500/20 transition">தமிழ் (Tamil)</button>
+                    <button type="button" onclick="selectQuizLang('hi', 'हिन्दी (Hindi)')" class="w-full text-left px-4 py-2.5 text-xs font-medium hover:bg-indigo-500/20 transition">हिन्दी (Hindi)</button>
+                    <button type="button" onclick="selectQuizLang('te', 'తెలుగు (Telugu)')" class="w-full text-left px-4 py-2.5 text-xs font-medium hover:bg-indigo-500/20 transition">తెలుగు (Telugu)</button>
+                    <button type="button" onclick="selectQuizLang('ml', 'മലയാളം (Malayalam)')" class="w-full text-left px-4 py-2.5 text-xs font-medium hover:bg-indigo-500/20 transition">മലയാളം (Malayalam)</button>
+                    <button type="button" onclick="selectQuizLang('kn', 'ಕನ್ನಡ (Kannada)')" class="w-full text-left px-4 py-2.5 text-xs font-medium hover:bg-indigo-500/20 transition">ಕನ್ನಡ (Kannada)</button>
+                </div>
+            </div>
+            <div id="timer-box" class="px-4 py-2 bg-indigo-500/10 border border-indigo-500/20 text-indigo-600 dark:text-indigo-300 text-xs rounded-2xl font-mono font-bold">⏳ <span id="time-left">60</span>s</div>
+        </div>
+    </div>
+    <div class="flex justify-between items-center mb-6 text-xs text-slate-500 dark:text-slate-400 font-semibold"><span id="progress-indicator">Loading questions...</span><button id="hint-btn" onclick="useHint()" class="hidden px-4 py-2 bg-amber-500/20 border border-amber-500/40 text-amber-600 dark:text-amber-300 rounded-2xl text-xs font-bold transition hover:bg-amber-500/30">💡 50-50 Hint</button></div>
+    <div id="quiz-container">
+        <div id="question-box"><h3 id="q-title" class="text-base sm:text-lg font-bold mb-6 leading-relaxed">Generating questions...</h3><div id="options-box" class="space-y-3.5 mb-8"></div><button id="next-btn" onclick="nextQuestion()" class="w-full py-4 theme-btn-bg hover:opacity-90 font-bold rounded-2xl hidden transition shadow-xl text-white">Next Question ➔</button></div>
+        <div id="result-box" class="hidden py-4 text-center"><h2 class="text-2xl font-extrabold text-emerald-400 mb-4">🎉 Test Completed Successfully!</h2><p class="text-sm text-slate-400 mb-6">Saving your answers and redirecting to dashboard...</p></div>
+    </div>
+</div>
+<script>
+    let questions = []; let currentIndex = 0; let userAnswers = {}; let timer = 60; let timerInterval = null;
+    function toggleLangMenu(type) { document.getElementById('lang-dropdown-' + type).classList.toggle('hidden'); }
+    async function loadQuiz() {
+        let persona = "{{ persona }}"; let subject = "{{ subject }}"; let count = "{{ count }}";
+        let savedState = localStorage.getItem('tuf_quiz_state_{{ subject }}');
+        if(savedState) { try { let parsed = JSON.parse(savedState); questions = parsed.questions; currentIndex = parsed.currentIndex; userAnswers = parsed.userAnswers; if(currentIndex < questions.length) { showQuestion(); return; } } catch(e) { console.error("Error restoring quiz state:", e); } }
+        try {
+            let res = await fetch(`/api/get-dynamic-quiz?persona=${encodeURIComponent(persona)}&subject=${encodeURIComponent(subject)}&count=${count}`);
+            let data = await res.json();
+            if(data.status === 'success' && data.questions.length > 0) {
+                questions = data.questions.map(q => ({ ...q, original_question: q.question, original_options: [...q.options] }));
+                currentIndex = 0; userAnswers = {}; saveQuizState(); showQuestion();
+            } else { document.getElementById('q-title').innerText = "Failed to generate questions."; }
+        } catch (err) { console.error("Error loading quiz:", err); document.getElementById('q-title').innerText = "Error connecting to backend server."; }
+    }
+    function saveQuizState() { localStorage.setItem('tuf_quiz_state_{{ subject }}', JSON.stringify({ questions, currentIndex, userAnswers })); }
+    function startTimer() {
+        timer = 60; document.getElementById('time-left').innerText = timer; document.getElementById('hint-btn').classList.add('hidden');
+        if(timerInterval) clearInterval(timerInterval);
+        timerInterval = setInterval(() => {
+            timer--; if(timer > 0) { document.getElementById('time-left').innerText = timer; }
+            else { clearInterval(timerInterval); document.getElementById('time-left').innerText = "0"; document.getElementById('hint-btn').classList.remove('hidden'); }
+        }, 1000);
+    }
+    function useHint() {
+        let q = questions[currentIndex]; let buttons = document.querySelectorAll('.option-btn'); let hiddenCount = 0;
+        buttons.forEach(btn => { if(btn.getAttribute('data-opt') !== q.answer && hiddenCount < 2) { btn.style.opacity = '0.2'; btn.style.pointerEvents = 'none'; hiddenCount++; } });
+        document.getElementById('hint-btn').classList.add('hidden');
+    }
+    function showQuestion() {
+        if(currentIndex >= questions.length) { if(timerInterval) clearInterval(timerInterval); finishQuiz(); return; }
+        startTimer(); document.getElementById('progress-indicator').innerText = `Question ${currentIndex + 1} of ${questions.length}`;
+        document.getElementById('current-lang-quiz').innerText = "English (Original)"; renderCurrentQuestionText();
+    }
+    function renderCurrentQuestionText() {
+        let q = questions[currentIndex]; document.getElementById('q-title').innerText = `${currentIndex + 1}. ${q.question}`;
+        let optBox = document.getElementById('options-box'); optBox.innerHTML = '';
+        q.options.forEach((opt, idx) => {
+            let origOpt = q.original_options[idx];
+            let isSelected = userAnswers[currentIndex] === origOpt;
+            let activeClass = isSelected ? 'bg-indigo-600/20 border-indigo-500 font-bold shadow-md' : 'glass-card hover:border-indigo-500/40';
+            optBox.innerHTML += `<button onclick="selectOption('${escapeHtml(origOpt)}', this)" data-opt="${escapeHtml(origOpt)}" class="option-btn w-full text-left p-4 rounded-2xl border transition font-medium text-sm sm:text-base ${activeClass}"><span class="font-bold text-indigo-600 dark:text-indigo-400 mr-2">${String.fromCharCode(65 + idx)}.</span> <span class="option-text-val">${opt}</span></button>`;
+        });
+        let nextBtn = document.getElementById('next-btn');
+        if(userAnswers[currentIndex] !== undefined) nextBtn.classList.remove('hidden'); else nextBtn.classList.add('hidden');
+    }
+    async function selectQuizLang(langCode, langName) {
+        document.getElementById('current-lang-quiz').innerText = langName; document.getElementById('lang-dropdown-quiz').classList.add('hidden');
+        let q = questions[currentIndex];
+        if(langCode === 'en') { q.question = q.original_question; q.options = [...q.original_options]; renderCurrentQuestionText(); return; }
+        try {
+            let qRes = await fetch(`https://translate.googleapis.com/translate_a/single?client=gtx&sl=en&tl=${langCode}&dt=t&q=` + encodeURIComponent(q.original_question));
+            let qData = await qRes.json(); if(qData && qData[0]) q.question = qData[0].map(i => i[0]).join('');
+            let newOpts = [];
+            for(let i=0; i<q.original_options.length; i++) {
+                let optRes = await fetch(`https://translate.googleapis.com/translate_a/single?client=gtx&sl=en&tl=${langCode}&dt=t&q=` + encodeURIComponent(q.original_options[i]));
+                let optData = await optRes.json(); if(optData && optData[0]) newOpts.push(optData[0].map(j => j[0]).join('')); else newOpts.push(q.original_options[i]);
+            }
+            q.options = newOpts; renderCurrentQuestionText();
+        } catch(e) { console.error("Translation error:", e); }
+    }
+    function selectOption(origOptVal, btnElement) {
+        userAnswers[currentIndex] = origOptVal; saveQuizState();
+        document.querySelectorAll('.option-btn').forEach(btn => { btn.classList.remove('bg-indigo-600/20', 'border-indigo-500', 'font-bold', 'shadow-md'); btn.classList.add('glass-card'); });
+        btnElement.classList.remove('glass-card'); btnElement.classList.add('bg-indigo-600/20', 'border-indigo-500', 'font-bold', 'shadow-md');
+        document.getElementById('next-btn').classList.remove('hidden');
+    }
+    function nextQuestion() { currentIndex++; saveQuizState(); showQuestion(); }
+    async function finishQuiz() {
+        localStorage.removeItem('tuf_quiz_state_{{ subject }}');
+        document.getElementById('question-box').classList.add('hidden'); document.getElementById('result-box').classList.remove('hidden');
+        let score = 0; let reviewList = [];
+        questions.forEach((q, idx) => {
+            let userAns = userAnswers[idx] || "Not Answered";
+            let cleanUser = userAns.replace(/[.,\/#!$%\^&\*;:{}=\-_`~()]/g,"").trim().toLowerCase();
+            let cleanCorrect = q.answer.replace(/[.,\/#!$%\^&\*;:{}=\-_`~()]/g,"").trim().toLowerCase();
+            let isCorrect = (cleanUser === cleanCorrect);
+            if(isCorrect) score++;
+            let displayUserAns = userAns;
+            let displayCorrectAns = q.answer;
+            reviewList.push({ "category": "Mock Test", "question": q.original_question, "user_ans": displayUserAns, "correct_ans": displayCorrectAns, "is_correct": isCorrect, "explanation": q.explanation });
+        });
+        let percentage = Math.round((score / questions.length) * 100);
+        try { await fetch('/api/save-quiz-result', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ subject: "{{ subject }}", score, total: questions.length, percentage, review: reviewList }) }); } catch(e) { console.error("Error saving quiz result:", e); }
+        setTimeout(() => { window.location.href = "/dashboard"; }, 1200);
+    }
+    function escapeHtml(text) { return text.replace(/'/g, "&#39;").replace(/"/g, "&quot;"); }
+    loadQuiz();
+</script>
+{% endblock %}'''
+
+for filename, content in [
+    ('base.html', base_html), ('index.html', index_html), ('login.html', login_html),
+    ('signup.html', signup_html), ('forgot_pin.html', forgot_html),
+    ('dashboard.html', dashboard_html), ('about.html', about_html), ('contact.html', contact_html),
+    ('terms.html', terms_html), ('mock_setup.html', mock_setup_html), ('mock_live.html', mock_live_html),
+    ('quiz_setup.html', quiz_setup_html), ('quiz.html', quiz_html)
+]:
+    with open(os.path.join('app/templates', filename), 'w', encoding='utf-8') as f:
+        f.write(content)
+
+print("Setup completed successfully with language-independent original option evaluation mapping!")
+
+--- FILE END: .\setup.py ---
+
+
+
+--- FILE START: .\update_db.py ---
+
+import sqlite3
+import os
+
+db_path = os.path.abspath("edtech.db")
+print("Updating database at:", db_path)
+
+conn = sqlite3.connect(db_path)
+cursor = conn.cursor()
+
+try:
+    # Drop old interview_results table if schema is outdated and recreate cleanly
+    cursor.execute("DROP TABLE IF EXISTS interview_results;")
+    cursor.execute("""
+        CREATE TABLE interview_results (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id VARCHAR(20) NOT NULL,
+            role VARCHAR(100) NOT NULL,
+            score INTEGER NOT NULL,
+            total INTEGER NOT NULL,
+            percentage INTEGER NOT NULL,
+            feedback_summary TEXT NOT NULL,
+            timestamp DATETIME
+        );
+    """)
+    conn.commit()
+    print("Successfully recreated 'interview_results' table with 'percentage' column!")
+except Exception as e:
+    print("Error updating database:", e)
+
+conn.close()
+
+--- FILE END: .\update_db.py ---
+
+
+
+--- FILE START: .\app\models.py ---
+
+from flask_sqlalchemy import SQLAlchemy
+from datetime import datetime
+
+db = SQLAlchemy()
+
+class UserTest(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    username = db.Column(db.String(100), nullable=False)
+    test_type = db.Column(db.String(50), nullable=False) # e.g., 'resume_interview', 'aspirant_50', 'skill_20'
+    score = db.Column(db.Integer, default=0)
+    total_questions = db.Column(db.Integer, default=0)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+class QuestionCache(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    topic = db.Column(db.String(100), nullable=False)
+    question_text = db.Column(db.Text, unique=True, nullable=False)
+    option_a = db.Column(db.String(255), nullable=True)
+    option_b = db.Column(db.String(255), nullable=True)
+    option_c = db.Column(db.String(255), nullable=True)
+    option_d = db.Column(db.String(255), nullable=True)
+    correct_answer = db.Column(db.String(255), nullable=True)
+    explanation = db.Column(db.Text, nullable=True)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+--- FILE END: .\app\models.py ---
+
+
+
+--- FILE START: .\app\routes.py ---
+
+import os
+from flask import Blueprint, jsonify, render_template, request
+from app.models import db, QuestionCache
+
+# Blueprint definition
+quiz_bp = Blueprint('quiz_bp', __name__)
+
+@quiz_bp.route('/')
+def index():
+    return render_template('index.html')
+
+@quiz_bp.route('/api/get-local-quiz', methods=['GET'])
+def get_local_quiz():
+    topic = request.args.get('topic', 'Accounts Executive')
+    # Fetch questions from local database
+    questions = QuestionCache.query.filter_by(topic=topic).limit(20).all()
+    
+    if not questions:
+        questions = QuestionCache.query.limit(20).all()
+
+    quiz_list = []
+    for q in questions:
+        quiz_list.append({
+            "id": q.id,
+            "question": q.question_text,
+            "options": [q.option_a, q.option_b, q.option_c, q.option_d],
+            "answer": q.correct_answer,
+            "explanation": q.explanation
+        })
+        
+    return jsonify({"status": "success", "questions": quiz_list})
+
+--- FILE END: .\app\routes.py ---
+
+
+
+--- FILE START: .\app\__init__.py ---
+
+from flask import Flask, render_template
+from dotenv import load_dotenv
+import os
+from app.models import db
+
+def create_app():
+    load_dotenv()
+    app = Flask(__name__)
+    app.config['SECRET_KEY'] = 'tuf_tactics_secure_key_2026'
+    
+    # SQLite Database setup
+    db_path = os.path.join(os.path.abspath(os.path.dirname(__file__)), '..', 'edtech.db')
+    app.config['SQLALCHEMY_DATABASE_URI'] = f'sqlite:///{db_path}'
+    app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
+
+    db.init_app(app)
+
+    with app.app_context():
+        db.create_all()
+
+    # Register Blueprints
+    from app.utils.gemini_rotator import gemini_bp
+    app.register_blueprint(gemini_bp)
+
+    @app.route('/')
+    def index():
+        return render_template('index.html')
+
+    return app
+
+--- FILE END: .\app\__init__.py ---
+
+
+
+--- FILE START: .\app\templates\about.html ---
+
+{% extends "base.html" %}
+{% block title %}About Us - TufTactics{% endblock %}
+{% block content %}
+<div class="max-w-3xl mx-auto text-center py-8 sm:py-16">
+    <h1 class="text-3xl sm:text-4xl font-extrabold mb-6">About TufTactics</h1>
+    <p class="text-slate-600 dark:text-slate-300 text-base sm:text-lg leading-relaxed mb-10 px-4">
+        TufTactics is an advanced AI-powered career growth and mock interview practice platform. We empower job aspirants and professionals by providing daily role-based skill assessments, targeted interview questions, and comprehensive performance feedback loops.
+    </p>
+    <div class="glass-card p-8 rounded-3xl text-left space-y-4 mx-4 shadow-2xl">
+        <h3 class="text-xl font-bold text-indigo-600 dark:text-indigo-400 mb-2">Official Career & Support Channels</h3>
+        <p class="text-sm text-slate-500 dark:text-slate-300">📧 Support Email: <a href="mailto:tuftactics1528@gmail.com" class="text-indigo-600 dark:text-indigo-400 hover:underline font-semibold">tuftactics1528@gmail.com</a></p>
+        <p class="text-sm text-slate-500 dark:text-slate-300">📺 YouTube Channel: <a href="https://www.youtube.com/@TufTactics" target="_blank" class="text-indigo-600 dark:text-indigo-400 hover:underline font-semibold">youtube.com/@TufTactics</a></p>
+        <p class="text-sm text-slate-500 dark:text-slate-300">📷 Instagram Community: <a href="https://www.instagram.com/tuftactics_1/" target="_blank" class="text-purple-600 dark:text-purple-400 hover:underline font-semibold">instagram.com/tuftactics_1</a></p>
+    </div>
+</div>
+{% endblock %}
+
+--- FILE END: .\app\templates\about.html ---
+
+
+
+--- FILE START: .\app\templates\base.html ---
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{% block title %}TufTactics{% endblock %}</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap');
+        * { font-family: 'Plus Jakarta Sans', sans-serif; }
+        body.dark-mode { background-color: #0b0f19; background-attachment: fixed; color: #f8fafc; }
+        body.dark-mode .glass-card { background: rgba(15, 23, 42, 0.8); backdrop-filter: blur(25px); border: 1px solid rgba(79, 70, 229, 0.2); box-shadow: 0 20px 50px rgba(0, 0, 0, 0.6); }
+        body.dark-mode .glass-input { background: rgba(3, 7, 18, 0.85); color: #ffffff; border: 1px solid rgba(79, 70, 229, 0.3); }
+        body.dark-mode .glass-input option { background-color: #0f172a; color: #ffffff; }
+        body.light-mode { background-color: #f8fafc; background-attachment: fixed; color: #0f172a; }
+        body.light-mode .glass-card { background: rgba(255, 255, 255, 0.9); backdrop-filter: blur(25px); border: 1px solid rgba(226, 232, 240, 0.9); box-shadow: 0 20px 40px rgba(15, 23, 42, 0.06); }
+        body.light-mode .glass-input { background: rgba(255, 255, 255, 0.95); color: #0f172a; border: 1px solid rgba(203, 213, 225, 0.9); }
+        body.light-mode .glass-input option { background-color: #ffffff; color: #0f172a; }
+        body.light-mode header { background-color: rgba(255, 255, 255, 0.9) !important; border-bottom: 1px solid rgba(226, 232, 240, 0.9) !important; }
+        body.light-mode footer { background-color: rgba(248, 250, 252, 0.9) !important; border-top: 1px solid rgba(226, 232, 240, 0.9) !important; color: #475569 !important; }
+        .theme-gradient-text { background: linear-gradient(135deg, #4f46e5 0%, #3b82f6 50%, #0ea5e9 100%); -webkit-background-clip: text; -webkit-text-fill-color: transparent; }
+        .theme-btn-bg { background: linear-gradient(135deg, #4f46e5 0%, #3b82f6 100%); box-shadow: 0 10px 25px rgba(79, 70, 229, 0.4); color: #ffffff; }
+        .theme-btn-bg:hover { opacity: 0.92; transform: translateY(-1px); }
+    </style>
+</head>
+<body class="{{ theme }}-mode min-h-screen flex flex-col justify-between selection:bg-indigo-500 selection:text-white transition-colors duration-300">
+    <header class="w-full backdrop-blur-2xl sticky top-0 z-50 transition-colors duration-300 border-b border-indigo-500/10">
+        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-18 flex items-center justify-between">
+            <a href="/" class="flex items-center space-x-3"><span class="font-extrabold text-2xl tracking-tight theme-gradient-text">TufTactics</span></a>
+            <nav class="hidden lg:flex space-x-8 text-sm font-semibold text-slate-400 dark:text-slate-300">
+                <a href="/" class="hover:text-indigo-500 transition">Home</a>
+                <a href="/quiz" class="hover:text-indigo-500 transition">Mock Test</a>
+                <a href="/mock-interview" class="hover:text-indigo-500 transition font-bold text-indigo-400">Mock Interview 🚀</a>
+                <a href="/dashboard" class="hover:text-indigo-500 transition">Dashboard</a>
+                <a href="/about" class="hover:text-indigo-500 transition">About Us</a>
+                <a href="/contact" class="hover:text-indigo-500 transition">Contact</a>
+            </nav>
+            <div class="flex items-center space-x-3">
+                <button onclick="toggleTheme()" id="theme-btn" class="p-2.5 glass-card rounded-2xl text-xs font-bold transition hover:scale-105" title="Toggle Light/Dark Mode">{{ '☀️' if theme == 'light' else '🌙' }}</button>
+                {% if session.get('user_id') %}
+                <a href="/dashboard" class="px-4 py-2 bg-indigo-500/10 border border-indigo-500/20 text-indigo-600 dark:text-indigo-300 text-xs sm:text-sm font-semibold rounded-2xl transition flex items-center space-x-2"><span>✨ <span class="hidden sm:inline">{{ session.get('user_name') }}</span></span></a>
+                <a href="/logout" class="px-3 py-2 bg-rose-500/10 border border-rose-500/20 text-rose-600 dark:text-rose-300 text-xs font-bold rounded-2xl transition">Sign Out</a>
+                {% else %}
+                <a href="/login" class="px-4 py-2 text-xs sm:text-sm font-semibold text-slate-400 dark:text-slate-300 hover:text-indigo-500 transition">Sign In</a>
+                <a href="/signup" class="px-5 py-2.5 theme-btn-bg text-xs sm:text-sm font-bold rounded-2xl transition">Get Started</a>
+                {% endif %}
+            </div>
+        </div>
+    </header>
+    <main class="flex-grow flex items-center justify-center p-4 sm:p-6 lg:p-8"><div class="w-full max-w-5xl mx-auto">{% block content %}{% endblock %}</div></main>
+    <footer class="w-full py-8 text-center text-xs sm:text-sm transition-colors duration-300 border-t border-indigo-500/10">
+        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 flex flex-col sm:flex-row items-center justify-between gap-4">
+            <p class="text-slate-500 font-medium">&copy; 2026 TufTactics. All rights reserved.</p>
+            <div class="flex items-center space-x-6 text-slate-500 font-medium">
+                <a href="https://www.youtube.com/@TufTactics" target="_blank" class="hover:text-indigo-500 transition">YouTube</a>
+                <a href="https://www.instagram.com/tuftactics_1/" target="_blank" class="hover:text-indigo-500 transition">Instagram</a>
+                <a href="mailto:tuftactics1528@gmail.com" class="hover:text-indigo-500 transition">Support</a>
+            </div>
+            <a href="/terms" class="text-slate-500 hover:text-indigo-500 transition">Privacy Policy & Terms</a>
+        </div>
+    </footer>
+    <script>
+        async function toggleTheme() {
+            let body = document.body;
+            let btn = document.getElementById('theme-btn');
+            let newTheme = body.classList.contains('dark-mode') ? 'light' : 'dark';
+            if(newTheme === 'light') { body.classList.remove('dark-mode'); body.classList.add('light-mode'); if(btn) btn.innerText = '☀️'; }
+            else { body.classList.remove('light-mode'); body.classList.add('dark-mode'); if(btn) btn.innerText = '🌙'; }
+            try { await fetch('/api/set-theme', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ theme: newTheme }) }); } catch (err) { console.error("Failed to save theme:", err); }
+        }
+    </script>
+</body>
+</html>
+
+--- FILE END: .\app\templates\base.html ---
+
+
+
+--- FILE START: .\app\templates\contact.html ---
+
+{% extends "base.html" %}
+{% block title %}Contact & Reviews - TufTactics{% endblock %}
+{% block content %}
+<div class="w-full max-w-2xl mx-auto glass-card p-8 sm:p-10 rounded-3xl shadow-2xl">
+    <div class="text-center mb-8">
+        <h2 class="text-2xl sm:text-3xl font-extrabold mb-2">Get in Touch, Ratings & Reviews</h2>
+        <p class="text-sm text-slate-500 dark:text-slate-400">Share your feedback, report bugs, request features, or drop a star rating & review!</p>
+    </div>
+    {% if success_msg %}
+    <div class="mb-6 p-4 bg-emerald-500/10 border border-emerald-500/20 text-emerald-600 dark:text-emerald-300 text-sm rounded-2xl text-center font-semibold">
+        {{ success_msg }}
+    </div>
+    {% endif %}
+    <div class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-8">
+        <a href="mailto:tuftactics1528@gmail.com" class="glass-card p-5 rounded-2xl text-center hover:scale-[1.02] transition flex flex-col items-center justify-center">
+            <svg class="w-7 h-7 mb-2 text-indigo-500" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z"/></svg>
+            <h4 class="font-bold text-sm mb-1">Email Support</h4>
+            <p class="text-xs text-slate-500 dark:text-slate-400 truncate w-full">tuftactics1528@gmail.com</p>
+        </a>
+        <a href="https://www.youtube.com/@TufTactics" target="_blank" class="glass-card p-5 rounded-2xl text-center hover:scale-[1.02] transition flex flex-col items-center justify-center">
+            <svg class="w-7 h-7 mb-2 text-rose-500" fill="currentColor" viewBox="0 0 24 24"><path d="M23.498 6.186a3.016 3.016 0 0 0-2.122-2.136C19.505 3.545 12 3.545 12 3.545s-7.505 0-9.377.505A3.017 3.017 0 0 0 .502 6.186C0 8.07 0 12 0 12s0 3.93.502 5.814a3.016 3.016 0 0 0 2.122 2.136c1.871.505 9.376.505 9.376.505s7.505 0 9.377-.505a3.015 3.015 0 0 0 2.122-2.136C24 15.93 24 12 24 12s0-3.93-.502-5.814zM9.545 15.568V8.432L15.818 12l-6.273 3.568z"/></svg>
+            <h4 class="font-bold text-sm mb-1">YouTube</h4>
+            <p class="text-xs text-slate-500 dark:text-slate-400">@TufTactics</p>
+        </a>
+        <a href="https://www.instagram.com/tuftactics_1/" target="_blank" class="glass-card p-5 rounded-2xl text-center hover:scale-[1.02] transition flex flex-col items-center justify-center">
+            <svg class="w-7 h-7 mb-2 text-pink-500" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><rect width="20" height="20" x="2" y="2" rx="5" ry="5"/><path d="M16 11.37A4 4 0 1 1 12.63 8 4 4 0 0 1 16 11.37z"/><line x1="17.5" x2="17.51" y1="6.5" y2="6.5"/></svg>
+            <h4 class="font-bold text-sm mb-1">Instagram</h4>
+            <p class="text-xs text-slate-500 dark:text-slate-400">@tuftactics_1</p>
+        </a>
+    </div>
+    <div class="glass-card p-6 sm:p-8 rounded-3xl">
+        <h3 class="text-lg font-extrabold mb-4 flex items-center space-x-2"><span>⭐ Submit Review, Bug Report or Feedback</span></h3>
+        <form method="POST" class="space-y-4">
+            <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div><label class="block text-xs font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider mb-2">Your Name</label><input type="text" name="name" required class="w-full px-4 py-3 glass-input rounded-2xl focus:outline-none text-sm font-medium" placeholder="Lokesh Krishan"></div>
+                <div><label class="block text-xs font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider mb-2">Your Email</label><input type="email" name="email" required class="w-full px-4 py-3 glass-input rounded-2xl focus:outline-none text-sm font-medium" placeholder="user@example.com"></div>
+            </div>
+            <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div><label class="block text-xs font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider mb-2">Category</label><select name="category" class="w-full px-4 py-3 glass-input rounded-2xl focus:outline-none text-sm font-medium" required><option value="Review & Rating">⭐ Review & Rating</option><option value="General Feedback">💬 General Feedback</option><option value="Bug Report">🐛 Bug Report</option></select></div>
+                <div><label class="block text-xs font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider mb-2">Star Rating</label><select name="rating" class="w-full px-4 py-3 glass-input rounded-2xl focus:outline-none text-sm font-medium"><option value="5">⭐⭐⭐⭐⭐ (5/5)</option><option value="4">⭐⭐⭐⭐ (4/5)</option><option value="3">⭐⭐⭐ (3/5)</option></select></div>
+            </div>
+            <div><label class="block text-xs font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider mb-2">Message</label><textarea name="message" rows="4" required class="w-full px-4 py-3 glass-input rounded-2xl focus:outline-none text-sm font-medium resize-none" placeholder="Write your review or feedback..."></textarea></div>
+            <button type="submit" class="w-full py-4 theme-btn-bg font-bold rounded-2xl transition shadow-xl text-white">Submit Now ➔</button>
+        </form>
+    </div>
+</div>
+{% endblock %}
+
+--- FILE END: .\app\templates\contact.html ---
+
+
+
+--- FILE START: .\app\templates\dashboard.html ---
+
+{% extends "base.html" %}
+{% block title %}User Dashboard - TufTactics{% endblock %}
+{% block content %}
+<div class="w-full max-w-4xl mx-auto glass-card p-8 sm:p-10 rounded-3xl shadow-2xl">
+    <div class="flex flex-col md:flex-row justify-between items-start md:items-center border-b pb-6 mb-8 gap-4 border-slate-200 dark:border-white/5">
+        <div><h1 class="text-2xl sm:text-3xl font-extrabold mb-1">Welcome, {{ user_name }}! ✨</h1><p class="text-sm text-slate-500 dark:text-slate-400">User Identification ID: <span class="font-mono text-indigo-600 dark:text-indigo-300 font-bold bg-indigo-500/10 px-3 py-1 rounded-xl border border-indigo-500/20">{{ user_id }}</span></p></div>
+        <div class="flex items-center space-x-3"><a href="/logout" class="px-4 py-2 bg-rose-500/10 border border-rose-500/20 text-rose-600 dark:text-rose-300 hover:bg-rose-500/20 text-xs font-bold rounded-2xl transition">Sign Out</a></div>
+    </div>
+
+    <div class="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
+        <div class="glass-card p-6 rounded-3xl border border-indigo-500/30 md:col-span-2 flex flex-col justify-between">
+            <div><h3 class="text-lg font-bold mb-1">📈 Overall Progress Score</h3><p class="text-xs text-slate-500 dark:text-slate-400 mb-4">Calculated from your average test & interview performances.</p></div>
+            <div class="flex items-center space-x-4">
+                <div class="text-3xl font-extrabold theme-gradient-text">{{ avg_score }}%</div>
+                <div class="w-full bg-black/20 h-3 rounded-full overflow-hidden"><div class="theme-btn-bg h-full rounded-full" style="width: {{ avg_score }}%;"></div></div>
+            </div>
+        </div>
+        <div class="glass-card p-6 rounded-3xl border border-indigo-500/30 flex flex-col justify-center text-center">
+            <p class="text-xs text-slate-400 uppercase font-bold tracking-wider mb-1">Total Tests & Interviews</p>
+            <p class="text-xl font-extrabold theme-gradient-text">{{ total_tests }} Tests | {{ total_interviews }} Interviews</p>
+        </div>
+    </div>
+
+    <div class="grid grid-cols-1 md:grid-cols-2 gap-6 mb-8">
+        <div class="glass-card p-8 rounded-3xl flex flex-col justify-between"><div><h3 class="text-xl font-bold mb-2">🎯 Take Mock Test</h3><p class="text-sm text-slate-500 dark:text-slate-400 mb-6">Configure your Persona and start your customized skill or academic test.</p></div><a href="/quiz" class="inline-block text-center px-6 py-4 theme-btn-bg font-bold text-sm rounded-2xl transition shadow-xl text-white">Configure Mock Test ➔</a></div>
+        <div class="glass-card p-8 rounded-3xl flex flex-col justify-between"><div><h3 class="text-xl font-bold mb-2">🚀 Launch Mock Interview</h3><p class="text-sm text-slate-500 dark:text-slate-400 mb-6">Upload resume & start your 30-Question corporate technical interview.</p></div><a href="/mock-interview" class="inline-block text-center px-6 py-4 theme-btn-bg font-bold text-sm rounded-2xl transition shadow-xl text-white">Start Mock Interview ➔</a></div>
+    </div>
+
+    <div class="glass-card p-6 sm:p-8 rounded-3xl">
+        <h3 class="text-lg font-bold mb-4">📊 Past Marksheets & Detailed Question Reviews</h3>
+        <p class="text-xs text-slate-400 mb-6">🔒 Note: Detailed question answers and explanations are automatically deleted after 24 hours for privacy, but your progress score is permanently retained.</p>
+        
+        {% if past_interviews %}
+        <div class="space-y-6 max-h-[600px] overflow-y-auto pr-2">
+            {% for item in past_interviews %}
+            <div class="glass-card p-6 rounded-2xl border border-indigo-500/20 space-y-4">
+                <div class="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-2 border-b pb-4 border-indigo-500/10">
+                    <div><span class="px-3 py-1 bg-indigo-500/10 text-indigo-400 text-xs font-bold rounded-full border border-indigo-500/20">{{ item.role }}</span><p class="text-xs text-slate-400 mt-2">Taken on: {{ item.timestamp }}</p></div>
+                    <div class="text-right"><span class="text-xl font-extrabold text-emerald-400">{{ item.score }}/{{ item.total }} ({{ item.percentage }}%)</span></div>
+                </div>
+                <p class="text-sm text-slate-300 bg-black/20 p-3 rounded-xl">💡 <strong>Performance Summary:</strong> {{ item.feedback_summary }}</p>
+                {% if item.review and not item.is_expired %}
+                <div class="space-y-3 mt-4">
+                    <h4 class="font-bold text-xs uppercase tracking-wider text-slate-400">Detailed Q&A Breakdown (Active for 24h):</h4>
+                    {% for rev in item.review %}
+                    <div class="glass-card p-4 rounded-xl border {{ 'border-emerald-500/30' if rev.is_correct else 'border-rose-500/30' }} text-xs space-y-1">
+                        <span class="font-bold text-indigo-400">[{{ rev.category }}]</span>
+                        <p class="font-semibold text-white">{{ rev.question }}</p>
+                        <p>Your Answer: <span class="{{ 'text-emerald-400 font-bold' if rev.is_correct else 'text-rose-400 font-bold' }}">{{ rev.user_ans }}</span></p>
+                        {% if not rev.is_correct %}<p>Correct Answer: <span class="text-emerald-400 font-bold">{{ rev.correct_ans }}</span></p>{% endif %}
+                        <p class="text-slate-400 mt-1">Explanation: {{ rev.explanation }}</p>
+                    </div>
+                    {% endfor %}
+                </div>
+                {% else %}
+                <p class="text-xs text-amber-400/80 bg-amber-500/10 p-3 rounded-xl">⚠️ Detailed Q&A review expired after 24 hours for privacy.</p>
+                {% endif %}
+            </div>
+            {% endfor %}
+        </div>
+        {% else %}<p class="text-sm text-slate-400">No mock tests or interviews taken yet. Start practicing above!</p>{% endif %}
+    </div>
+</div>
+{% endblock %}
+
+--- FILE END: .\app\templates\dashboard.html ---
+
+
+
+--- FILE START: .\app\templates\forgot_pin.html ---
+
+{% extends "base.html" %}
+{% block title %}Reset PIN - TufTactics{% endblock %}
+{% block content %}
+<div class="w-full max-w-md mx-auto glass-card p-8 sm:p-10 rounded-3xl shadow-2xl">
+    <div class="text-center mb-8"><h2 class="text-2xl font-extrabold mb-2">Reset 4-Digit PIN</h2><p class="text-sm text-slate-500 dark:text-slate-400">Verify your registered details to set a new PIN</p></div>
+    {% if error %}<div class="mb-6 p-4 bg-rose-500/10 border border-rose-500/20 text-rose-600 dark:text-rose-300 text-xs rounded-2xl text-center font-semibold">{{ error }}</div>{% endif %}
+    <form method="POST" class="space-y-4">
+        <div><label class="block text-xs font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider mb-2">Registered Email or Phone</label><input type="text" name="identifier" required class="w-full px-4 py-3.5 glass-input rounded-2xl focus:outline-none text-sm font-medium" placeholder="user@example.com or 9876543210"></div>
+        <div><label class="block text-xs font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider mb-2">Registered Full Name</label><input type="text" name="name" required class="w-full px-4 py-3.5 glass-input rounded-2xl focus:outline-none text-sm font-medium" placeholder="Lokesh Krishan"></div>
+        <div><label class="block text-xs font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider mb-2">New 4-Digit PIN</label><input type="password" name="new_pin" minlength="4" maxlength="4" pattern="\d{4}" required oninput="this.value = this.value.replace(/[^0-9]/g, '').slice(0, 4);" class="w-full px-4 py-3.5 glass-input rounded-2xl focus:outline-none tracking-widest text-center text-lg font-bold" placeholder="••••"></div>
+        <button type="submit" class="w-full py-4 theme-btn-bg font-bold rounded-2xl transition shadow-xl mt-4 text-white">Update PIN ➔</button>
+    </form>
+    <p class="text-center text-sm text-slate-500 dark:text-slate-400 mt-6">Remembered your PIN? <a href="/login" class="text-indigo-600 dark:text-indigo-400 font-bold hover:underline">Sign In</a></p>
+</div>
+{% endblock %}
+
+--- FILE END: .\app\templates\forgot_pin.html ---
+
+
+
+--- FILE START: .\app\templates\index.html ---
+
+{% extends "base.html" %}
+{% block title %}TufTactics - AI-Powered Mock Interviews & Career Practice{% endblock %}
+{% block content %}
+<div class="max-w-4xl mx-auto text-center py-8 sm:py-16">
+    <div class="inline-block mb-6 px-5 py-2 bg-indigo-500/10 border border-indigo-500/20 text-indigo-500 dark:text-indigo-400 text-xs font-bold tracking-widest uppercase rounded-full shadow-lg">⚡ Next-Gen AI Career & Interview Engine</div>
+    <h1 class="text-4xl sm:text-6xl lg:text-7xl font-extrabold tracking-tight mb-6 leading-tight">Master Your Dream Role With <span class="theme-gradient-text">Precision AI Practice</span></h1>
+    <p class="text-slate-600 dark:text-slate-300 text-base sm:text-lg lg:text-xl mb-6 max-w-2xl mx-auto leading-relaxed px-4">TufTactics equips aspirants and professionals with adaptive role-based mock tests, deep performance analytics, and dynamic interview simulations.</p>
+    <div class="mb-12 inline-block px-4 py-2 bg-amber-500/10 border border-amber-500/20 text-amber-500 dark:text-amber-400 text-xs font-medium rounded-2xl">⚠️ <strong>Note:</strong> Content is generated by AI. Evaluations and questions may contain minor inaccuracies; use as a guidance tool.</div>
+
+    <div class="flex justify-center gap-4 px-4"><a href="/mock-interview" class="w-full sm:w-auto px-10 py-4 theme-btn-bg font-bold rounded-2xl text-lg transition shadow-2xl flex items-center justify-center space-x-3 text-white"><span>Start Mock Interview 🚀</span><span>➔</span></a></div>
+
+    <div class="grid grid-cols-1 md:grid-cols-3 gap-6 mt-16 text-left px-4">
+        <div class="glass-card p-8 rounded-3xl transition hover:scale-[1.02]"><div class="w-12 h-12 rounded-2xl bg-indigo-500/10 flex items-center justify-center text-xl mb-4 text-indigo-500">🎯</div><h3 class="font-bold text-lg mb-2">Persona & Resume Tests</h3><p class="text-sm text-slate-500 dark:text-slate-400">Custom role-based mock tests and resume interviews tailored strictly to your career path to build real job readiness.</p></div>
+        <div class="glass-card p-8 rounded-3xl transition hover:scale-[1.02]"><div class="w-12 h-12 rounded-2xl bg-blue-500/10 flex items-center justify-center text-xl mb-4 text-blue-500">📈</div><h3 class="font-bold text-lg mb-2">Dashboard Progress Analytics</h3><p class="text-sm text-slate-500 dark:text-slate-400">Track your overall average growth percentage, test counts, and interview performance loops to systematically level up your skills.</p></div>
+        <div class="glass-card p-8 rounded-3xl transition hover:scale-[1.02]"><div class="w-12 h-12 rounded-2xl bg-purple-500/10 flex items-center justify-center text-xl mb-4 text-purple-500">🔒</div><h3 class="font-bold text-lg mb-2">Secure & Private</h3><p class="text-sm text-slate-500 dark:text-slate-400">Uploaded resumes are instantly deleted and Q&A history auto-clears after 24 hours to ensure 100% data privacy.</p></div>
+    </div>
+</div>
+{% endblock %}
+
+--- FILE END: .\app\templates\index.html ---
+
+
+
+--- FILE START: .\app\templates\login.html ---
+
+{% extends "base.html" %}
+{% block title %}Sign In - TufTactics{% endblock %}
+{% block content %}
+<div class="w-full max-w-md mx-auto glass-card p-8 sm:p-10 rounded-3xl shadow-2xl">
+    <div class="text-center mb-8"><h2 class="text-2xl font-extrabold mb-2">Welcome Back</h2><p class="text-sm text-slate-500 dark:text-slate-400">Enter your credentials to access your portal</p></div>
+    {% if error %}<div class="mb-6 p-4 bg-rose-500/10 border border-rose-500/20 text-rose-600 dark:text-rose-300 text-xs rounded-2xl text-center font-semibold">{{ error }}</div>{% endif %}
+    <form method="POST" class="space-y-5">
+        <div><label class="block text-xs font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider mb-2">Email or Phone Number</label><input type="text" name="identifier" required class="w-full px-4 py-3.5 glass-input rounded-2xl focus:outline-none text-sm font-medium" placeholder="user@example.com or 9876543210"></div>
+        <div><div class="flex justify-between items-center mb-2"><label class="block text-xs font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider">4-Digit PIN Number</label><a href="/forgot-pin" class="text-xs text-indigo-600 dark:text-indigo-400 font-semibold hover:underline">Forgot PIN?</a></div><input type="password" name="pin" maxlength="4" pattern="\d{4}" required oninput="this.value = this.value.replace(/[^0-9]/g, '').slice(0, 4);" class="w-full px-4 py-3.5 glass-input rounded-2xl focus:outline-none tracking-widest text-center text-lg font-bold" placeholder="••••"></div>
+        <button type="submit" class="w-full py-4 theme-btn-bg font-bold rounded-2xl transition shadow-xl mt-4 text-white">Access Dashboard ➔</button>
+    </form>
+    <p class="text-center text-sm text-slate-500 dark:text-slate-400 mt-8">Don't have an account? <a href="/signup" class="text-indigo-600 dark:text-indigo-400 font-bold hover:underline">Sign Up Now</a></p>
+</div>
+{% endblock %}
+
+--- FILE END: .\app\templates\login.html ---
+
+
+
+--- FILE START: .\app\templates\mock_live.html ---
+
+{% extends "base.html" %}
+{% block title %}Mock Interview Live - TufTactics{% endblock %}
+{% block content %}
+<div class="w-full max-w-2xl mx-auto glass-card p-8 sm:p-10 rounded-3xl shadow-2xl">
+    <div class="flex flex-col sm:flex-row justify-between items-center mb-6 gap-4 border-b pb-4 border-indigo-500/10">
+        <div><span class="px-3 py-1 bg-indigo-500/10 text-indigo-400 text-xs font-bold rounded-full border border-indigo-500/20">{{ question.category }}</span><h1 class="text-lg font-extrabold mt-2">Role: {{ role }}</h1></div>
+        <div class="px-4 py-2 bg-indigo-500/10 border border-indigo-500/20 text-indigo-400 text-xs rounded-2xl font-mono font-bold">Question {{ index }} of {{ total }}</div>
+    </div>
+    <form method="POST" class="space-y-6">
+        <h3 class="text-base sm:text-lg font-bold mb-6 leading-relaxed">{{ question.question }}</h3>
+        <div class="space-y-3.5 mb-8">
+            {% for opt in question.options %}
+            <label class="glass-card flex items-center p-4 rounded-2xl border border-transparent hover:border-indigo-500/40 cursor-pointer transition font-medium text-sm sm:text-base">
+                <input type="radio" name="answer" value="{{ opt }}" required class="w-4 h-4 text-indigo-600 focus:ring-indigo-500 mr-3"><span>{{ opt }}</span>
+            </label>
+            {% endfor %}
+        </div>
+        <button type="submit" class="w-full py-4 theme-btn-bg font-bold rounded-2xl transition shadow-xl text-white">{% if index == total %}Finish & View Report ➔{% else %}Next Question ➔{% endif %}</button>
+    </form>
+</div>
+{% endblock %}
+
+--- FILE END: .\app\templates\mock_live.html ---
+
+
+
+--- FILE START: .\app\templates\mock_result.html ---
+
+{% extends "base.html" %}
+{% block title %}Interview Report Card - TufTactics{% endblock %}
+{% block content %}
+<div class="w-full max-w-3xl mx-auto glass-card p-8 sm:p-10 rounded-3xl shadow-2xl">
+    <div class="text-center mb-8">
+        <h2 class="text-2xl sm:text-3xl font-extrabold text-emerald-400 mb-2">🎉 Mock Interview Completed!</h2>
+        <p class="text-slate-400 text-sm">Target Role: <span class="text-white font-bold">{{ role }}</span></p>
+    </div>
+    <div class="glass-card p-6 rounded-3xl mb-6 text-center shadow-inner space-y-2">
+        <p class="text-2xl sm:text-3xl font-extrabold theme-gradient-text">Score: {{ score }} / {{ total }} ({{ percentage }}%)</p>
+        <p class="text-slate-300 text-xs sm:text-sm font-medium leading-relaxed bg-black/20 p-4 rounded-2xl">{{ summary }}</p>
+    </div>
+    <h3 class="text-base sm:text-lg font-bold mb-4">Detailed Question & Answer Review:</h3>
+    <div class="space-y-4 max-h-96 overflow-y-auto pr-2 mb-8">
+        {% for item in review %}
+        <div class="glass-card border {{ 'border-emerald-500/30' if item.is_correct else 'border-rose-500/30' }} p-5 rounded-2xl text-left text-xs sm:text-sm space-y-2">
+            <span class="px-2.5 py-0.5 bg-indigo-500/10 text-indigo-400 text-[10px] font-bold rounded-full">{{ item.category }}</span>
+            <p class="font-bold">{{ item.question }}</p>
+            <p><span class="text-slate-400 font-medium">Your Answer:</span> <span class="{{ 'text-emerald-400 font-bold' if item.is_correct else 'text-rose-400 font-bold' }}">{{ item.user_ans }}</span></p>
+            {% if not item.is_correct %}
+            <p><span class="text-slate-400 font-medium">Correct Answer:</span> <span class="text-emerald-400 font-bold">{{ item.correct_ans }}</span></p>
+            {% endif %}
+            <p class="text-xs text-slate-400 glass-card p-3 rounded-xl mt-2">💡 <strong>Expert Rationale:</strong> {{ item.explanation }}</p>
+        </div>
+        {% endfor %}
+    </div>
+    <div class="flex flex-col sm:flex-row gap-4">
+        <button onclick="window.print()" class="flex-1 py-4 theme-btn-bg font-bold rounded-2xl transition shadow-xl text-sm text-white">📥 Download PDF Report Card</button>
+        <a href="/mock-interview" class="flex-1 text-center py-4 bg-indigo-500/10 hover:bg-indigo-500/20 border border-indigo-500/20 font-bold rounded-2xl transition text-sm">Take New Mock Interview</a>
+    </div>
+</div>
+{% endblock %}
+
+--- FILE END: .\app\templates\mock_result.html ---
+
+
+
+--- FILE START: .\app\templates\mock_setup.html ---
+
+{% extends "base.html" %}
+{% block title %}Mock Interview Setup - TufTactics{% endblock %}
+{% block content %}
+<div class="w-full max-w-xl mx-auto glass-card p-8 sm:p-10 rounded-3xl shadow-2xl">
+    <div class="text-center mb-8"><h2 class="text-2xl sm:text-3xl font-extrabold theme-gradient-text mb-2">🚀 Corporate Mock Interview</h2><p class="text-xs sm:text-sm text-slate-500 dark:text-slate-400">Upload your resume & enter target role for a 30-Question Assessment.</p></div>
+    {% if error %}
+    <div class="mb-6 p-6 bg-rose-500/10 border border-rose-500/30 text-rose-300 text-sm rounded-3xl text-center font-bold space-y-4">
+        <p>{{ error }}</p>
+        <a href="/dashboard" class="inline-block px-6 py-3 theme-btn-bg text-white rounded-2xl text-xs font-bold transition shadow-lg">Return to Dashboard ➔</a>
+    </div>
+    {% else %}
+    <form method="POST" enctype="multipart/form-data" class="space-y-6">
+        <div><label class="block text-xs font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider mb-2">Target Job Role / Title</label><input type="text" name="target_role" required class="w-full px-4 py-3.5 glass-input rounded-2xl focus:outline-none text-sm font-medium" placeholder="e.g. Senior Python Developer"></div>
+        <div><label class="block text-xs font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider mb-2">Upload Resume (PDF or DOCX)</label><input type="file" name="resume" accept=".pdf,.docx" required class="w-full px-4 py-3 glass-input rounded-2xl focus:outline-none text-sm font-medium"></div>
+        <button type="submit" class="w-full py-4 theme-btn-bg font-bold rounded-2xl transition shadow-xl text-white">Generate 30-Q Interview ➔</button>
+    </form>
+    {% endif %}
+</div>
+{% endblock %}
+
+--- FILE END: .\app\templates\mock_setup.html ---
+
+
+
+--- FILE START: .\app\templates\quiz.html ---
+
+{% extends "base.html" %}
+{% block title %}Mock Test - TufTactics{% endblock %}
+{% block content %}
+<div class="w-full max-w-2xl mx-auto glass-card p-8 sm:p-10 rounded-3xl shadow-2xl">
+    <div class="flex flex-col sm:flex-row justify-between items-center mb-6 gap-4">
+        <div><h1 class="text-xl font-extrabold theme-gradient-text">🔥 {{ persona }} Assessment</h1><p class="text-xs text-slate-500 dark:text-slate-400 mt-1">Focus Area: <span class="text-slate-800 dark:text-slate-200 font-semibold">{{ subject }}</span></p></div>
+        <div class="flex items-center space-x-2">
+            <div class="relative">
+                <button type="button" onclick="toggleLangMenu('quiz')" id="lang-btn-quiz" class="px-3 py-1.5 glass-input text-xs font-bold rounded-xl flex items-center space-x-2 hover:border-indigo-500"><span>🌐 <span id="current-lang-quiz">English (Original)</span></span><span>▼</span></button>
+                <div id="lang-dropdown-quiz" class="hidden absolute right-0 mt-2 w-44 glass-card rounded-2xl shadow-2xl z-50 border border-indigo-500/30 overflow-hidden py-1">
+                    <button type="button" onclick="selectQuizLang('en', 'English (Original)')" class="w-full text-left px-4 py-2.5 text-xs font-bold hover:bg-indigo-500/20 transition">English (Original)</button>
+                    <button type="button" onclick="selectQuizLang('ta', 'தமிழ் (Tamil)')" class="w-full text-left px-4 py-2.5 text-xs font-medium hover:bg-indigo-500/20 transition">தமிழ் (Tamil)</button>
+                    <button type="button" onclick="selectQuizLang('hi', 'हिन्दी (Hindi)')" class="w-full text-left px-4 py-2.5 text-xs font-medium hover:bg-indigo-500/20 transition">हिन्दी (Hindi)</button>
+                    <button type="button" onclick="selectQuizLang('te', 'తెలుగు (Telugu)')" class="w-full text-left px-4 py-2.5 text-xs font-medium hover:bg-indigo-500/20 transition">తెలుగు (Telugu)</button>
+                    <button type="button" onclick="selectQuizLang('ml', 'മലയാളം (Malayalam)')" class="w-full text-left px-4 py-2.5 text-xs font-medium hover:bg-indigo-500/20 transition">മലയാളം (Malayalam)</button>
+                    <button type="button" onclick="selectQuizLang('kn', 'ಕನ್ನಡ (Kannada)')" class="w-full text-left px-4 py-2.5 text-xs font-medium hover:bg-indigo-500/20 transition">ಕನ್ನಡ (Kannada)</button>
+                </div>
+            </div>
+            <div id="timer-box" class="px-4 py-2 bg-indigo-500/10 border border-indigo-500/20 text-indigo-600 dark:text-indigo-300 text-xs rounded-2xl font-mono font-bold">⏳ <span id="time-left">60</span>s</div>
+        </div>
+    </div>
+    <div class="flex justify-between items-center mb-6 text-xs text-slate-500 dark:text-slate-400 font-semibold"><span id="progress-indicator">Loading questions...</span><button id="hint-btn" onclick="useHint()" class="hidden px-4 py-2 bg-amber-500/20 border border-amber-500/40 text-amber-600 dark:text-amber-300 rounded-2xl text-xs font-bold transition hover:bg-amber-500/30">💡 50-50 Hint</button></div>
+    <div id="quiz-container">
+        <div id="question-box"><h3 id="q-title" class="text-base sm:text-lg font-bold mb-6 leading-relaxed">Generating questions...</h3><div id="options-box" class="space-y-3.5 mb-8"></div><button id="next-btn" onclick="nextQuestion()" class="w-full py-4 theme-btn-bg hover:opacity-90 font-bold rounded-2xl hidden transition shadow-xl text-white">Next Question ➔</button></div>
+        <div id="result-box" class="hidden py-4 text-center"><h2 class="text-2xl font-extrabold text-emerald-400 mb-4">🎉 Test Completed Successfully!</h2><p class="text-sm text-slate-400 mb-6">Saving your answers and redirecting to dashboard...</p></div>
+    </div>
+</div>
+<script>
+    let questions = []; let currentIndex = 0; let userAnswers = {}; let timer = 60; let timerInterval = null;
+    function toggleLangMenu(type) { document.getElementById('lang-dropdown-' + type).classList.toggle('hidden'); }
+    async function loadQuiz() {
+        let persona = "{{ persona }}"; let subject = "{{ subject }}"; let count = "{{ count }}";
+        let savedState = localStorage.getItem('tuf_quiz_state_{{ subject }}');
+        if(savedState) { try { let parsed = JSON.parse(savedState); questions = parsed.questions; currentIndex = parsed.currentIndex; userAnswers = parsed.userAnswers; if(currentIndex < questions.length) { showQuestion(); return; } } catch(e) { console.error("Error restoring quiz state:", e); } }
+        try {
+            let res = await fetch(`/api/get-dynamic-quiz?persona=${encodeURIComponent(persona)}&subject=${encodeURIComponent(subject)}&count=${count}`);
+            let data = await res.json();
+            if(data.status === 'success' && data.questions.length > 0) {
+                questions = data.questions.map(q => ({ ...q, original_question: q.question, original_options: [...q.options] }));
+                currentIndex = 0; userAnswers = {}; saveQuizState(); showQuestion();
+            } else { document.getElementById('q-title').innerText = "Failed to generate questions."; }
+        } catch (err) { console.error("Error loading quiz:", err); document.getElementById('q-title').innerText = "Error connecting to backend server."; }
+    }
+    function saveQuizState() { localStorage.setItem('tuf_quiz_state_{{ subject }}', JSON.stringify({ questions, currentIndex, userAnswers })); }
+    function startTimer() {
+        timer = 60; document.getElementById('time-left').innerText = timer; document.getElementById('hint-btn').classList.add('hidden');
+        if(timerInterval) clearInterval(timerInterval);
+        timerInterval = setInterval(() => {
+            timer--; if(timer > 0) { document.getElementById('time-left').innerText = timer; }
+            else { clearInterval(timerInterval); document.getElementById('time-left').innerText = "0"; document.getElementById('hint-btn').classList.remove('hidden'); }
+        }, 1000);
+    }
+    function useHint() {
+        let q = questions[currentIndex]; let buttons = document.querySelectorAll('.option-btn'); let hiddenCount = 0;
+        buttons.forEach(btn => { if(btn.getAttribute('data-opt') !== q.answer && hiddenCount < 2) { btn.style.opacity = '0.2'; btn.style.pointerEvents = 'none'; hiddenCount++; } });
+        document.getElementById('hint-btn').classList.add('hidden');
+    }
+    function showQuestion() {
+        if(currentIndex >= questions.length) { if(timerInterval) clearInterval(timerInterval); finishQuiz(); return; }
+        startTimer(); document.getElementById('progress-indicator').innerText = `Question ${currentIndex + 1} of ${questions.length}`;
+        document.getElementById('current-lang-quiz').innerText = "English (Original)"; renderCurrentQuestionText();
+    }
+    function renderCurrentQuestionText() {
+        let q = questions[currentIndex]; document.getElementById('q-title').innerText = `${currentIndex + 1}. ${q.question}`;
+        let optBox = document.getElementById('options-box'); optBox.innerHTML = '';
+        q.options.forEach((opt, idx) => {
+            let origOpt = q.original_options[idx];
+            let isSelected = userAnswers[currentIndex] === origOpt;
+            let activeClass = isSelected ? 'bg-indigo-600/20 border-indigo-500 font-bold shadow-md' : 'glass-card hover:border-indigo-500/40';
+            optBox.innerHTML += `<button onclick="selectOption('${escapeHtml(origOpt)}', this)" data-opt="${escapeHtml(origOpt)}" class="option-btn w-full text-left p-4 rounded-2xl border transition font-medium text-sm sm:text-base ${activeClass}"><span class="font-bold text-indigo-600 dark:text-indigo-400 mr-2">${String.fromCharCode(65 + idx)}.</span> <span class="option-text-val">${opt}</span></button>`;
+        });
+        let nextBtn = document.getElementById('next-btn');
+        if(userAnswers[currentIndex] !== undefined) nextBtn.classList.remove('hidden'); else nextBtn.classList.add('hidden');
+    }
+    async function selectQuizLang(langCode, langName) {
+        document.getElementById('current-lang-quiz').innerText = langName; document.getElementById('lang-dropdown-quiz').classList.add('hidden');
+        let q = questions[currentIndex];
+        if(langCode === 'en') { q.question = q.original_question; q.options = [...q.original_options]; renderCurrentQuestionText(); return; }
+        try {
+            let qRes = await fetch(`https://translate.googleapis.com/translate_a/single?client=gtx&sl=en&tl=${langCode}&dt=t&q=` + encodeURIComponent(q.original_question));
+            let qData = await qRes.json(); if(qData && qData[0]) q.question = qData[0].map(i => i[0]).join('');
+            let newOpts = [];
+            for(let i=0; i<q.original_options.length; i++) {
+                let optRes = await fetch(`https://translate.googleapis.com/translate_a/single?client=gtx&sl=en&tl=${langCode}&dt=t&q=` + encodeURIComponent(q.original_options[i]));
+                let optData = await optRes.json(); if(optData && optData[0]) newOpts.push(optData[0].map(j => j[0]).join('')); else newOpts.push(q.original_options[i]);
+            }
+            q.options = newOpts; renderCurrentQuestionText();
+        } catch(e) { console.error("Translation error:", e); }
+    }
+    function selectOption(origOptVal, btnElement) {
+        userAnswers[currentIndex] = origOptVal; saveQuizState();
+        document.querySelectorAll('.option-btn').forEach(btn => { btn.classList.remove('bg-indigo-600/20', 'border-indigo-500', 'font-bold', 'shadow-md'); btn.classList.add('glass-card'); });
+        btnElement.classList.remove('glass-card'); btnElement.classList.add('bg-indigo-600/20', 'border-indigo-500', 'font-bold', 'shadow-md');
+        document.getElementById('next-btn').classList.remove('hidden');
+    }
+    function nextQuestion() { currentIndex++; saveQuizState(); showQuestion(); }
+    async function finishQuiz() {
+        localStorage.removeItem('tuf_quiz_state_{{ subject }}');
+        document.getElementById('question-box').classList.add('hidden'); document.getElementById('result-box').classList.remove('hidden');
+        let score = 0; let reviewList = [];
+        questions.forEach((q, idx) => {
+            let userAns = userAnswers[idx] || "Not Answered";
+            let cleanUser = userAns.replace(/[.,\/#!$%\^&\*;:{}=\-_`~()]/g,"").trim().toLowerCase();
+            let cleanCorrect = q.answer.replace(/[.,\/#!$%\^&\*;:{}=\-_`~()]/g,"").trim().toLowerCase();
+            let isCorrect = (cleanUser === cleanCorrect);
+            if(isCorrect) score++;
+            let displayUserAns = userAns;
+            let displayCorrectAns = q.answer;
+            reviewList.push({ "category": "Mock Test", "question": q.original_question, "user_ans": displayUserAns, "correct_ans": displayCorrectAns, "is_correct": isCorrect, "explanation": q.explanation });
+        });
+        let percentage = Math.round((score / questions.length) * 100);
+        try { await fetch('/api/save-quiz-result', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ subject: "{{ subject }}", score, total: questions.length, percentage, review: reviewList }) }); } catch(e) { console.error("Error saving quiz result:", e); }
+        setTimeout(() => { window.location.href = "/dashboard"; }, 1200);
+    }
+    function escapeHtml(text) { return text.replace(/'/g, "&#39;").replace(/"/g, "&quot;"); }
+    loadQuiz();
+</script>
+{% endblock %}
+
+--- FILE END: .\app\templates\quiz.html ---
+
+
+
+--- FILE START: .\app\templates\quiz_setup.html ---
+
+{% extends "base.html" %}
+{% block title %}Configure Mock Test - TufTactics{% endblock %}
+{% block content %}
+<div class="w-full max-w-xl mx-auto glass-card p-8 sm:p-10 rounded-3xl shadow-2xl">
+    <div class="text-center mb-8"><h2 class="text-2xl sm:text-3xl font-extrabold theme-gradient-text mb-1">🎯 Configure Your Mock Test</h2><p class="text-xs text-slate-500 dark:text-slate-400">Select your learning persona to customize questions</p></div>
+    
+    {% if error %}
+    <div class="p-6 bg-rose-500/10 border border-rose-500/30 text-rose-300 text-sm rounded-3xl text-center font-bold space-y-4">
+        <p>{{ error }}</p>
+        <a href="/dashboard" class="inline-block px-6 py-3 theme-btn-bg text-white rounded-2xl text-xs font-bold transition shadow-lg">Return to Dashboard ➔</a>
+    </div>
+    {% else %}
+    <form action="/quiz-live" method="GET" onsubmit="return validateQuizForm(event)" class="space-y-5">
+        <div>
+            <label class="block text-xs font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider mb-2">Select User Persona</label>
+            <select name="persona" id="persona-select" onchange="togglePersonaFields()" class="w-full px-4 py-3.5 glass-input rounded-2xl focus:outline-none text-sm font-medium" required>
+                <option value="" disabled selected hidden>-- Select Persona --</option>
+                <option value="Student">Student</option>
+                <option value="Aspirant">Aspirant</option>
+                <option value="Job Seeker">Job Seeker</option>
+                <option value="Just Learning">Just Learning</option>
+            </select>
+        </div>
+        <div id="dynamic-fields" class="space-y-5"></div>
+        <button type="submit" id="submit-btn" class="w-full py-4 theme-btn-bg font-bold rounded-2xl transition shadow-xl mt-6 text-white">Start Mock Test ➔</button>
+    </form>
+    {% endif %}
+</div>
+<script>
+    const ugProfessions = ["Engineering", "Medicine & Healthcare", "Finance & Accounting", "Arts & Science", "Law", "Management", "Computer Applications", "Architecture", "Agriculture", "Mass Communication", "Others"];
+    const pgProfessions = ["Engineering (M.E / M.Tech)", "Medicine (MD / MS)", "Management (MBA)", "Arts & Science (M.Sc / M.A)", "Computer Applications (MCA)", "Law (LL.M)", "Others"];
+    const departmentsMap = {
+        "Engineering": ["Civil Engineering", "Mechanical Engineering", "Automobile Engineering", "Electrical & Electronics (EEE)", "Electronics & Communication (ECE)", "Computer Science & Engineering", "Information Technology", "Chemical Engineering", "Aerospace Engineering", "Biotechnology", "Others"],
+        "Medicine & Healthcare": ["MBBS", "BDS", "BAMS", "BHMS", "Nursing", "Pharmacy", "Radiology", "Others"],
+        "Finance & Accounting": ["Chartered Accountancy", "Cost Accountancy", "Banking & Insurance", "Corporate Finance", "Taxation", "Others"],
+        "Arts & Science": ["English Literature", "History", "Political Science", "Psychology", "Sociology", "Mathematics", "Physics", "Chemistry", "Computer Science", "Economics", "Others"],
+        "Law": ["LL.B / Corporate Law", "Criminal Law", "Cyber Law", "IPR Law", "Others"],
+        "Management": ["Marketing Management", "Human Resources", "Operations Management", "Business Analytics", "International Business", "Others"],
+        "Computer Applications": ["BCA", "MCA", "Software Development", "Cyber Security", "Others"],
+        "Others": ["Custom Department"]
+    };
+    const aspirantExamsMap = {
+        "NEET": ["Physics", "Chemistry", "Botany", "Zoology", "Others"],
+        "JEE": ["Physics", "Chemistry", "Mathematics", "Others"],
+        "TNPSC Group Exams": ["Group 1", "Group 2 / 2A", "Group 4 & VAO", "Others"],
+        "UPSC Civil Services": ["General Studies Paper 1", "CSAT", "Optional Subject", "Others"],
+        "Others": ["Custom Exam & Subject"]
+    };
+    const jobRolesMap = {
+        "Software Development": ["Python Developer", "Java Developer", "Full Stack Developer", "Frontend Developer", "Backend Developer", "DevOps Engineer", "QA Automation Engineer", "Mobile App Developer", "iOS Developer", "Android Developer", "Cloud Solutions Architect", "Cyber Security Analyst", "Blockchain Developer", "Systems Engineer", "Software Architect", "Others"],
+        "Data & AI": ["Data Analyst", "Data Scientist", "Machine Learning Engineer", "AI Engineer", "Business Intelligence (BI) Analyst", "Big Data Engineer", "Data Engineer", "Computer Vision Engineer", "NLP Engineer", "Deep Learning Specialist", "Others"],
+        "Core Engineering & Manufacturing": ["Mechanical Design Engineer", "Civil Structural Engineer", "Automobile Engineer", "Electrical Power Engineer", "Electronics Hardware Engineer", "Aerospace Engineer", "Chemical Process Engineer", "CAD / CAM Engineer", "QA / QC Engineer", "Production Manager", "Robotics Engineer", "Others"],
+        "Finance & Accounting": ["Accounts Executive", "Financial Analyst", "Tax Consultant", "Senior Auditor", "Payroll Specialist", "Investment Banking Analyst", "Risk Management Specialist", "Corporate Finance Manager", "Others"],
+        "Management, HR & Operations": ["HR Executive / Recruiter", "Project Manager", "Product Manager", "Business Development Manager", "Operations Executive", "Supply Chain Manager", "Logistics Coordinator", "Scrum Master", "Others"],
+        "Healthcare & Medical": ["General Physician", "Biomedical Engineer", "Clinical Research Associate", "Pharmacist", "Healthcare Administrator", "Nursing Supervisor", "Others"],
+        "Creative, Media & Design": ["UI/UX Designer", "Graphic Designer", "Video Editor & Animator", "Content Writer", "Interior Designer", "Architect", "Social Media Manager", "Creative Director", "Others"],
+        "Others": ["Custom Role"]
+    };
+
+    function togglePersonaFields() {
+        let persona = document.getElementById('persona-select').value;
+        let container = document.getElementById('dynamic-fields');
+        if(!container) return;
+        container.innerHTML = '';
+        if(persona === 'Student') {
+            container.innerHTML = `
+                <div><label class="block text-xs font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider mb-2">Degree Level</label><select name="edu_level" id="edu-level" onchange="updateProfessions()" class="w-full px-4 py-3.5 glass-input rounded-2xl focus:outline-none text-sm font-medium" required><option value="" disabled selected hidden>-- Select Degree Level --</option><option value="UG">Undergraduate (UG)</option><option value="PG">Postgraduate (PG)</option></select></div>
+                <div><label class="block text-xs font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider mb-2">Profession / Stream</label><select name="profession" id="profession-select" onchange="updateDepartments()" class="w-full px-4 py-3.5 glass-input rounded-2xl focus:outline-none text-sm font-medium" required><option value="" disabled selected hidden>-- Select Profession --</option></select></div>
+                <div id="custom-prof-box" class="hidden"><label class="block text-xs font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider mb-2">Specify Custom Profession</label><input type="text" id="custom-prof-input" class="w-full px-4 py-3.5 glass-input rounded-2xl focus:outline-none text-sm font-medium" placeholder="Enter custom profession..."></div>
+                
+                <div><label class="block text-xs font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider mb-2">Core Department / Branch</label><select name="department" id="department-select" onchange="checkCustomDept(this)" class="w-full px-4 py-3.5 glass-input rounded-2xl focus:outline-none text-sm font-medium" required><option value="" disabled selected hidden>-- Select Department --</option></select></div>
+                <div id="custom-dept-box" class="hidden"><label class="block text-xs font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider mb-2">Specify Custom Department (e.g. ECE / EEE / AI-DS)</label><input type="text" id="custom-dept-input" class="w-full px-4 py-3.5 glass-input rounded-2xl focus:outline-none text-sm font-medium" placeholder="Enter your department/branch name..."></div>
+                
+                <div class="grid grid-cols-2 gap-3">
+                    <div><label class="block text-xs font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider mb-2">Year of Study</label><select name="year" id="year-select" onchange="updateSemesters()" class="w-full px-4 py-3.5 glass-input rounded-2xl focus:outline-none text-sm font-medium" required><option value="" disabled selected hidden>-- Select Year --</option><option value="1st Year">1st Year</option><option value="2nd Year">2nd Year</option><option value="3rd Year">3rd Year</option><option value="4th Year / Final">4th Year / Final</option></select></div>
+                    <div><label class="block text-xs font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider mb-2">Semester</label><select name="semester" id="semester-select" class="w-full px-4 py-3.5 glass-input rounded-2xl focus:outline-none text-sm font-medium" required><option value="" disabled selected hidden>-- Select Sem --</option></select></div>
+                </div>
+                <div><label class="block text-xs font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider mb-2">Subject Name</label><input type="text" name="subject" required class="w-full px-4 py-3.5 glass-input rounded-2xl focus:outline-none text-sm font-medium" placeholder="e.g. Digital Signal Processing"></div>
+                <div><label class="block text-xs font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider mb-2">Question Count</label><select name="count" class="w-full px-4 py-3.5 glass-input rounded-2xl focus:outline-none text-sm font-medium" required><option value="10">10 Questions</option><option value="20">20 Questions</option><option value="50">50 Questions</option></select></div>
+            `;
+            updateProfessions(); updateSemesters();
+        } else if(persona === 'Aspirant') {
+            container.innerHTML = `
+                <div><label class="block text-xs font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider mb-2">Select Major Exam</label><select name="exam" id="exam-select" onchange="updateAspirantSubjects()" class="w-full px-4 py-3.5 glass-input rounded-2xl focus:outline-none text-sm font-medium" required><option value="" disabled selected hidden>-- Select Exam --</option><option value="NEET">NEET</option><option value="JEE">JEE</option><option value="TNPSC Group Exams">TNPSC Group Exams</option><option value="UPSC Civil Services">UPSC Civil Services</option><option value="Others">Others</option></select></div>
+                <div id="custom-exam-box" class="hidden"><label class="block text-xs font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider mb-2">Specify Custom Exam</label><input type="text" id="custom-exam-input" class="w-full px-4 py-3.5 glass-input rounded-2xl focus:outline-none text-sm font-medium" placeholder="Enter custom exam name..."></div>
+                
+                <div><label class="block text-xs font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider mb-2">Exam Subject / Group</label><select name="exam_subject" id="exam-subject-select" onchange="checkCustomExamSub(this)" class="w-full px-4 py-3.5 glass-input rounded-2xl focus:outline-none text-sm font-medium" required><option value="" disabled selected hidden>-- Select Subject / Group --</option></select></div>
+                <div id="custom-exam-sub-box" class="hidden"><label class="block text-xs font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider mb-2">Specify Custom Subject</label><input type="text" id="custom-exam-sub-input" class="w-full px-4 py-3.5 glass-input rounded-2xl focus:outline-none text-sm font-medium" placeholder="Enter custom subject..."></div>
+                
+                <input type="hidden" name="subject" id="aspirant-hidden-subject">
+                <div class="p-3 bg-indigo-500/10 border border-indigo-500/20 rounded-2xl text-xs text-indigo-400 text-center font-bold">📌 Aspirant exams strictly include 50 comprehensive questions.</div>
+                <input type="hidden" name="count" value="50">
+            `;
+            updateAspirantSubjects();
+        } else if(persona === 'Job Seeker') {
+            container.innerHTML = `
+                <div><label class="block text-xs font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider mb-2">Candidate Status</label><select name="exp_status" id="exp-status" onchange="toggleJobFields()" class="w-full px-4 py-3.5 glass-input rounded-2xl focus:outline-none text-sm font-medium" required><option value="" disabled selected hidden>-- Select Status --</option><option value="Fresher">Fresher</option><option value="Experienced">Experienced</option></select></div>
+                <div id="exp-duration-box" class="hidden">
+                    <label class="block text-xs font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider mb-2">Experience Duration</label>
+                    <div class="grid grid-cols-2 gap-3">
+                        <select name="exp_years" class="w-full px-4 py-3.5 glass-input rounded-2xl focus:outline-none text-sm font-medium"><option value="0">0 Years</option><option value="1">1 Year</option><option value="2">2 Years</option><option value="3">3 Years</option><option value="5">5 Years</option><option value="10">10+ Years</option></select>
+                        <select name="exp_months" class="w-full px-4 py-3.5 glass-input rounded-2xl focus:outline-none text-sm font-medium"><option value="0">0 Months</option><option value="3">3 Months</option><option value="6">6 Months</option><option value="9">9 Months</option></select>
+                    </div>
+                </div>
+                <div>
+                    <label class="block text-xs font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider mb-2">Industry Sector</label>
+                    <select name="industry" id="industry-select" onchange="updateJobRoles()" class="w-full px-4 py-3.5 glass-input rounded-2xl focus:outline-none text-sm font-medium" required>
+                        <option value="" disabled selected hidden>-- Select Sector --</option>
+                        <option value="Software Development">Software Development</option>
+                        <option value="Data & AI">Data & AI</option>
+                        <option value="Core Engineering & Manufacturing">Core Engineering & Manufacturing</option>
+                        <option value="Finance & Accounting">Finance & Accounting</option>
+                        <option value="Management, HR & Operations">Management, HR & Operations</option>
+                        <option value="Healthcare & Medical">Healthcare & Medical</option>
+                        <option value="Creative, Media & Design">Creative, Media & Design</option>
+                        <option value="Others">Others</option>
+                    </select>
+                </div>
+                <div id="custom-ind-box" class="hidden"><label class="block text-xs font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider mb-2">Specify Custom Industry Sector</label><input type="text" id="custom-ind-input" class="w-full px-4 py-3.5 glass-input rounded-2xl focus:outline-none text-sm font-medium" placeholder="Enter industry sector..."></div>
+                
+                <div>
+                    <label class="block text-xs font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider mb-2">Target Job Role</label>
+                    <select name="job_role" id="job-role-select" onchange="checkCustomRole(this)" class="w-full px-4 py-3.5 glass-input rounded-2xl focus:outline-none text-sm font-medium" required>
+                        <option value="" disabled selected hidden>-- Select Role --</option>
+                    </select>
+                </div>
+                <div id="custom-role-box" class="hidden"><label class="block text-xs font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider mb-2">Specify Custom Job Role</label><input type="text" id="custom-role-input" class="w-full px-4 py-3.5 glass-input rounded-2xl focus:outline-none text-sm font-medium" placeholder="Enter target job role..."></div>
+                
+                <input type="hidden" name="subject" id="hidden-subject-input">
+                <div><label class="block text-xs font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider mb-2">Question Count</label><select name="count" class="w-full px-4 py-3.5 glass-input rounded-2xl focus:outline-none text-sm font-medium" required><option value="10">10 Questions</option><option value="20">20 Questions</option><option value="50">50 Questions</option></select></div>
+            `;
+            updateJobRoles();
+        } else {
+            container.innerHTML = `
+                <div><label class="block text-xs font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider mb-2">Casual Topic / Skill</label><input type="text" name="subject" required class="w-full px-4 py-3.5 glass-input rounded-2xl focus:outline-none text-sm font-medium" placeholder="e.g. General Knowledge"></div>
+                <div><label class="block text-xs font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider mb-2">Question Count</label><select name="count" class="w-full px-4 py-3.5 glass-input rounded-2xl focus:outline-none text-sm font-medium" required><option value="10">10 Questions</option><option value="20">20 Questions</option><option value="50">50 Questions</option></select></div>
+            `;
+        }
+    }
+
+    function updateProfessions() {
+        let level = document.getElementById('edu-level'); if(!level) return;
+        let profSelect = document.getElementById('profession-select'); profSelect.innerHTML = '<option value="" disabled selected hidden>-- Select Profession --</option>';
+        (level.value === 'UG' ? ugProfessions : pgProfessions).forEach(p => { let opt = document.createElement('option'); opt.value = p; opt.textContent = p; profSelect.appendChild(opt); });
+        updateDepartments();
+    }
+    function updateDepartments() {
+        let prof = document.getElementById('profession-select'); if(!prof) return;
+        let deptSelect = document.getElementById('department-select'); deptSelect.innerHTML = '<option value="" disabled selected hidden>-- Select Department --</option>';
+        let customProfBox = document.getElementById('custom-prof-box');
+        if(prof.value === 'Others') { customProfBox.classList.remove('hidden'); } else { customProfBox.classList.add('hidden'); }
+        (departmentsMap[prof.value] || ["General Department"]).forEach(d => { let opt = document.createElement('option'); opt.value = d; opt.textContent = d; deptSelect.appendChild(opt); });
+    }
+    function checkCustomDept(selectEl) {
+        let box = document.getElementById('custom-dept-box');
+        if(selectEl.value === 'Others') { box.classList.remove('hidden'); } else { box.classList.add('hidden'); }
+    }
+    function updateAspirantSubjects() {
+        let exam = document.getElementById('exam-select'); if(!exam) return;
+        let subSelect = document.getElementById('exam-subject-select'); subSelect.innerHTML = '<option value="" disabled selected hidden>-- Select Subject / Group --</option>';
+        let customExamBox = document.getElementById('custom-exam-box');
+        if(exam.value === 'Others') { customExamBox.classList.remove('hidden'); } else { customExamBox.classList.add('hidden'); }
+        (aspirantExamsMap[exam.value] || ["General Studies"]).forEach(s => { let opt = document.createElement('option'); opt.value = s; opt.textContent = s; subSelect.appendChild(opt); });
+        checkCustomExamSub(subSelect);
+    }
+    function checkCustomExamSub(selectEl) {
+        let box = document.getElementById('custom-exam-sub-box');
+        if(selectEl.value === 'Others') { box.classList.remove('hidden'); } else { box.classList.add('hidden'); }
+    }
+    function updateSemesters() {
+        let year = document.getElementById('year-select'); if(!year) return;
+        let semSelect = document.getElementById('semester-select'); semSelect.innerHTML = '<option value="" disabled selected hidden>-- Select Sem --</option>';
+        (year.value === '1st Year' ? ["Semester 1", "Semester 2"] : year.value === '2nd Year' ? ["Semester 3", "Semester 4"] : year.value === '3rd Year' ? ["Semester 5", "Semester 6"] : ["Semester 7", "Semester 8"]).forEach(s => { let opt = document.createElement('option'); opt.value = s; opt.textContent = s; semSelect.appendChild(opt); });
+    }
+    function updateJobRoles() {
+        let ind = document.getElementById('industry-select'); if(!ind) return;
+        let roleSelect = document.getElementById('job-role-select'); roleSelect.innerHTML = '<option value="" disabled selected hidden>-- Select Role --</option>';
+        let customIndBox = document.getElementById('custom-ind-box');
+        if(ind.value === 'Others') { customIndBox.classList.remove('hidden'); } else { customIndBox.classList.add('hidden'); }
+        (jobRolesMap[ind.value] || ["General Role"]).forEach(r => { let opt = document.createElement('option'); opt.value = r; opt.textContent = r; roleSelect.appendChild(opt); });
+    }
+    function checkCustomRole(selectEl) {
+        let box = document.getElementById('custom-role-box');
+        if(selectEl.value === 'Others') { box.classList.remove('hidden'); } else { box.classList.add('hidden'); }
+    }
+    function toggleJobFields() { let status = document.getElementById('exp-status'); if(!status) return; let box = document.getElementById('exp-duration-box'); if(status.value === 'Experienced') box.classList.remove('hidden'); else box.classList.add('hidden'); }
+    
+    function validateQuizForm(event) {
+        let persona = document.getElementById('persona-select').value;
+        if(persona === 'Job Seeker') {
+            let roleSelect = document.getElementById('job-role-select').value;
+            let hiddenSub = document.getElementById('hidden-subject-input');
+            if(roleSelect === 'Others') {
+                let customVal = document.getElementById('custom-role-input').value.trim();
+                if(!customVal) { alert("Please specify your custom job role!"); event.preventDefault(); return false; }
+                hiddenSub.value = customVal;
+            } else {
+                hiddenSub.value = roleSelect;
+            }
+        } else if(persona === 'Aspirant') {
+            let examSelect = document.getElementById('exam-select').value;
+            let subSelect = document.getElementById('exam-subject-select').value;
+            let hiddenSub = document.getElementById('aspirant-hidden-subject');
+            let finalExamName = (examSelect === 'Others') ? document.getElementById('custom-exam-input').value.trim() : examSelect;
+            let finalSubName = (subSelect === 'Others') ? document.getElementById('custom-exam-sub-input').value.trim() : subSelect;
+            
+            if(examSelect === 'Others' && !finalExamName) { alert("Please specify your custom exam name!"); event.preventDefault(); return false; }
+            if(subSelect === 'Others' && !finalSubName) { alert("Please specify your custom subject!"); event.preventDefault(); return false; }
+            
+            hiddenSub.value = `${finalExamName} - ${finalSubName}`;
+        }
+        return true;
+    }
+</script>
+{% endblock %}
+
+--- FILE END: .\app\templates\quiz_setup.html ---
+
+
+
+--- FILE START: .\app\templates\signup.html ---
+
+{% extends "base.html" %}
+{% block title %}Create Account - TufTactics{% endblock %}
+{% block content %}
+<div class="w-full max-w-md mx-auto glass-card p-8 sm:p-10 rounded-3xl shadow-2xl">
+    <div class="text-center mb-8"><h2 class="text-2xl font-extrabold mb-2">Create Account</h2><p class="text-sm text-slate-500 dark:text-slate-400">Register to start your daily career practice tests</p></div>
+    {% if error %}<div class="mb-6 p-4 bg-rose-500/10 border border-rose-500/20 text-rose-600 dark:text-rose-300 text-xs rounded-2xl text-center font-semibold">{{ error }}</div>{% endif %}
+    <form method="POST" class="space-y-4">
+        <div><label class="block text-xs font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider mb-2">Full Name</label><input type="text" name="name" required class="w-full px-4 py-3.5 glass-input rounded-2xl focus:outline-none text-sm font-medium" placeholder="Lokesh Krishan"></div>
+        <div><label class="block text-xs font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider mb-2">Email Address</label><input type="email" name="email" required class="w-full px-4 py-3.5 glass-input rounded-2xl focus:outline-none text-sm font-medium" placeholder="user@example.com"></div>
+        <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <div><label class="block text-xs font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider mb-2">Phone (10 Digits)</label><input type="tel" name="phone" minlength="10" maxlength="10" pattern="\d{10}" required oninput="this.value = this.value.replace(/[^0-9]/g, '').slice(0, 10);" class="w-full px-4 py-3.5 glass-input rounded-2xl focus:outline-none text-sm font-medium" placeholder="9876543210"></div>
+            <div><label class="block text-xs font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider mb-2">Age</label><input type="number" name="age" min="10" max="100" required class="w-full px-4 py-3.5 glass-input rounded-2xl focus:outline-none text-sm font-medium" placeholder="22"></div>
+        </div>
+        <div><label class="block text-xs font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider mb-2">Create 4-Digit PIN Number</label><input type="password" name="pin" minlength="4" maxlength="4" pattern="\d{4}" required oninput="this.value = this.value.replace(/[^0-9]/g, '').slice(0, 4);" class="w-full px-4 py-3.5 glass-input rounded-2xl focus:outline-none tracking-widest text-center text-lg font-bold" placeholder="••••"></div>
+        <button type="submit" class="w-full py-4 theme-btn-bg font-bold rounded-2xl transition shadow-xl mt-4 text-white">Register & Continue ➔</button>
+    </form>
+    <p class="text-center text-sm text-slate-500 dark:text-slate-400 mt-6">Already registered? <a href="/login" class="text-indigo-600 dark:text-indigo-400 font-bold hover:underline">Sign In</a></p>
+</div>
+{% endblock %}
+
+--- FILE END: .\app\templates\signup.html ---
+
+
+
+--- FILE START: .\app\templates\terms.html ---
+
+{% extends "base.html" %}
+{% block title %}Privacy Policy & Terms - TufTactics{% endblock %}
+{% block content %}
+<div class="max-w-3xl mx-auto glass-card p-8 sm:p-10 rounded-3xl shadow-2xl text-left space-y-6">
+    <div class="border-b pb-4 border-slate-200 dark:border-white/5"><h1 class="text-2xl sm:text-3xl font-extrabold mb-2">Privacy Policy & Terms of Service</h1><p class="text-xs text-slate-500 dark:text-slate-400">Effective Date: September 2026 | TufTactics Platform</p></div>
+    <div><h3 class="text-lg font-bold text-indigo-600 dark:text-indigo-400 mb-2">1. Introduction & Platform Scope</h3><p class="text-sm text-slate-600 dark:text-slate-300 leading-relaxed">TufTactics is an AI-powered mock interview and professional skill practice platform.</p></div>
+    <div><h3 class="text-lg font-bold text-indigo-600 dark:text-indigo-400 mb-2">2. User Registration & Data Privacy</h3><p class="text-sm text-slate-600 dark:text-slate-300 leading-relaxed">Users register with verified personal information and secure 4-digit PIN authentication.</p></div>
+    <div><h3 class="text-lg font-bold text-indigo-600 dark:text-indigo-400 mb-2">3. Ad-Supported Free Practice</h3><p class="text-sm text-slate-600 dark:text-slate-300 leading-relaxed">Platform displays standard advertisements to keep practice free for aspirants.</p></div>
+</div>
+{% endblock %}
+
+--- FILE END: .\app\templates\terms.html ---
+
+
+
+--- FILE START: .\app\utils\gemini_rotator.py ---
+
+import os
+import json
+import google.generativeai as genai
+from flask import Blueprint, jsonify, request
+from app.models import db, QuestionCache
+
+gemini_bp = Blueprint('gemini_bp', __name__)
+
+def call_gemini_working_key(prompt):
+    api_key = os.getenv("GEMINI_API_KEY")
+    if not api_key:
+        return None
+
+    try:
+        genai.configure(api_key=api_key)
+        
+        # Using the exact recommended model gemini-3.8-flash
+        model = genai.GenerativeModel('gemini-3.8-flash')
+        response = model.generate_content(prompt)
+        return response.text
+    except Exception as e:
+        print(f"Error with 3.8-flash: {e}")
+        try:
+            # Fallback to general flash variant if needed
+            model = genai.GenerativeModel('gemini-flash')
+            response = model.generate_content(prompt)
+            return response.text
+        except Exception as e2:
+            print(f"Fallback Error: {e2}")
+            return None
+
+@gemini_bp.route('/generate-unique-questions', methods=['POST'])
+def generate_unique_questions():
+    data = request.json
+    topic = data.get('topic', 'General Programming')
+    count = int(data.get('count', 10))
+
+    existing = QuestionCache.query.filter_by(topic=topic).all()
+    existing_texts = [q.question_text for q in existing]
+
+    prompt = f"""
+    Generate {count} unique multiple-choice interview questions for the topic: {topic}.
+    Ensure these questions are completely distinct from these already asked questions: {existing_texts[-30:]}
+    Return strictly as a JSON list of objects with keys: "question", "options" (list of 4 options), "answer", "explanation". No markdown formatting outside json if possible, just raw JSON.
+    """
+
+    raw_response = call_gemini_working_key(prompt)
+    if not raw_response:
+        return jsonify({"error": "API key failed to generate response!"}), 500
+
+    try:
+        cleaned_json = raw_response.replace("```json", "").replace("```", "").strip()
+        questions_list = json.loads(cleaned_json)
+
+        new_saved_questions = []
+        for q in questions_list:
+            q_text = q.get('question')
+            if not QuestionCache.query.filter_by(question_text=q_text).first():
+                opts = q.get('options', ["A", "B", "C", "D"])
+                new_q = QuestionCache(
+                    topic=topic,
+                    question_text=q_text,
+                    option_a=opts[0] if len(opts) > 0 else "",
+                    option_b=opts[1] if len(opts) > 1 else "",
+                    option_c=opts[2] if len(opts) > 2 else "",
+                    option_d=opts[3] if len(opts) > 3 else "",
+                    correct_answer=q.get('answer'),
+                    explanation=q.get('explanation')
+                )
+                db.session.add(new_q)
+                new_saved_questions.append(q)
+
+        db.session.commit()
+        return jsonify({"status": "success", "new_questions": new_saved_questions})
+    
+    except Exception as e:
+        return jsonify({"error": str(e), "raw": raw_response}), 400
+
+@gemini_bp.route('/test-ai')
+def test_ai():
+    prompt = "Give a 1-sentence welcoming quote for a smart EdTech platform students."
+    ai_output = call_gemini_working_key(prompt)
+    return jsonify({"response": ai_output})
+
+--- FILE END: .\app\utils\gemini_rotator.py ---
+

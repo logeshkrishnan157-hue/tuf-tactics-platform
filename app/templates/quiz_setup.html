@@ -1,0 +1,176 @@
+{% extends "base.html" %}
+{% block title %}Configure Mock Test - TufTactics{% endblock %}
+{% block content %}
+<div class="w-full max-w-xl mx-auto glass-card p-8 sm:p-10 rounded-3xl shadow-2xl relative">
+    <div id="loading-overlay" class="hidden absolute inset-0 bg-slate-950/90 backdrop-blur-md rounded-3xl z-50 flex flex-col items-center justify-center p-6 text-center space-y-4">
+        <div class="w-12 h-12 border-4 border-indigo-500 border-t-transparent rounded-full spinner"></div>
+        <h3 class="text-lg font-extrabold text-white">⚡ High Traffic / AI Generation in Progress</h3>
+        <p class="text-xs text-slate-300 max-w-sm leading-relaxed">Please wait while our AI engine generates your custom assessment questions using the 80-20 rule!</p>
+    </div>
+
+    <div class="text-center mb-8"><h2 class="text-2xl sm:text-3xl font-extrabold theme-gradient-text mb-1">🎯 Configure Your Mock Test</h2><p class="text-xs text-slate-500 dark:text-slate-400">Select your learning persona to customize questions</p></div>
+    
+    {% if error %}
+    <div class="p-6 bg-rose-500/10 border border-rose-500/30 text-rose-300 text-sm rounded-3xl text-center font-bold space-y-4">
+        <p>{{ error }}</p>
+        <a href="/dashboard" class="inline-block px-6 py-3 theme-btn-bg text-white rounded-2xl text-xs font-bold transition shadow-lg">Return to Dashboard ➔</a>
+    </div>
+    {% else %}
+    <form action="/quiz-live" method="GET" onsubmit="return validateQuizForm(event)" class="space-y-5">
+        <div>
+            <label class="block text-xs font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider mb-2">Select User Persona</label>
+            <select name="persona" id="persona-select" onchange="togglePersonaFields()" class="w-full px-4 py-3.5 glass-input rounded-2xl focus:outline-none text-sm font-medium" required>
+                <option value="" disabled selected hidden>-- Select Persona --</option>
+                <option value="Student">Student</option>
+                <option value="Aspirant">Aspirant</option>
+                <option value="Job Seeker">Job Seeker</option>
+                <option value="Skill Training & Practice">Skill Training & Practice</option>
+            </select>
+        </div>
+        <div id="dynamic-fields" class="space-y-5"></div>
+        <input type="hidden" name="subject" id="final-subject-input">
+        <button type="submit" id="submit-btn" class="w-full py-4 theme-btn-bg font-bold rounded-2xl transition shadow-xl mt-6 text-white">Start Mock Test ➔</button>
+    </form>
+    {% endif %}
+</div>
+<script>
+    const ugProfessions = ["Engineering", "Medicine & Healthcare", "Finance & Accounting", "Arts & Science", "Law", "Management", "Computer Applications", "Architecture", "Agriculture", "Mass Communication", "Others"];
+    const pgProfessions = ["Engineering (M.E / M.Tech)", "Medicine (MD / MS)", "Management (MBA)", "Arts & Science (M.Sc / M.A)", "Computer Applications (MCA)", "Law (LL.M)", "Others"];
+    const departmentsMap = {
+        "Engineering": ["Civil Engineering", "Mechanical Engineering", "Automobile Engineering", "Electrical & Electronics (EEE)", "Electronics & Communication (ECE)", "Computer Science & Engineering", "Information Technology", "Chemical Engineering", "Aerospace Engineering", "Biotechnology", "Others"],
+        "Medicine & Healthcare": ["MBBS", "BDS", "BAMS", "BHMS", "Nursing", "Pharmacy", "Radiology", "Others"],
+        "Finance & Accounting": ["Chartered Accountancy", "Cost Accountancy", "Banking & Insurance", "Corporate Finance", "Taxation", "Others"],
+        "Arts & Science": ["English Literature", "History", "Political Science", "Psychology", "Sociology", "Mathematics", "Physics", "Chemistry", "Computer Science", "Economics", "Others"],
+        "Law": ["LL.B / Corporate Law", "Criminal Law", "Cyber Law", "IPR Law", "Others"],
+        "Management": ["Marketing Management", "Human Resources", "Operations Management", "Business Analytics", "International Business", "Others"],
+        "Computer Applications": ["BCA", "MCA", "Software Development", "Cyber Security", "Others"],
+        "Others": ["Custom Department"]
+    };
+    const aspirantExamsMap = {
+        "NEET": ["Physics", "Chemistry", "Botany", "Zoology", "Others"],
+        "JEE": ["Physics", "Chemistry", "Mathematics", "Others"],
+        "TNPSC Group Exams": ["Group 1", "Group 2 / 2A", "Group 4 & VAO", "Others"],
+        "UPSC Civil Services": ["General Studies Paper 1", "CSAT", "Optional Subject", "Others"],
+        "Others": ["Custom Exam & Subject"]
+    };
+    const jobRolesMap = {
+        "Software Development": ["Python Developer", "Java Developer", "Full Stack Developer", "Frontend Developer", "Backend Developer", "DevOps Engineer", "QA Automation Engineer", "Mobile App Developer", "Cloud Solutions Architect", "Others"],
+        "Data & AI": ["Data Analyst", "Data Scientist", "Machine Learning Engineer", "AI Engineer", "Business Intelligence Analyst", "Others"],
+        "Core Engineering & Manufacturing": ["Mechanical Design Engineer", "Civil Structural Engineer", "Automobile Engineer", "Electrical Power Engineer", "Others"],
+        "Finance & Accounting": ["Accounts Executive", "Financial Analyst", "Tax Consultant", "Senior Auditor", "Others"],
+        "Management, HR & Operations": ["HR Executive", "Project Manager", "Product Manager", "Operations Executive", "Others"],
+        "Others": ["Custom Role"]
+    };
+
+    function togglePersonaFields() {
+        let persona = document.getElementById('persona-select').value;
+        let container = document.getElementById('dynamic-fields');
+        if(!container) return;
+        container.innerHTML = '';
+        if(persona === 'Student') {
+            container.innerHTML = `
+                <div><label class="block text-xs font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider mb-2">Degree Level</label><select name="edu_level" id="edu-level" onchange="updateProfessions()" class="w-full px-4 py-3.5 glass-input rounded-2xl focus:outline-none text-sm font-medium" required><option value="" disabled selected hidden>-- Select Degree Level --</option><option value="UG">Undergraduate (UG)</option><option value="PG">Postgraduate (PG)</option></select></div>
+                <div><label class="block text-xs font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider mb-2">Profession / Stream</label><select name="profession" id="profession-select" onchange="updateDepartments()" class="w-full px-4 py-3.5 glass-input rounded-2xl focus:outline-none text-sm font-medium" required><option value="" disabled selected hidden>-- Select Profession --</option></select></div>
+                <div><label class="block text-xs font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider mb-2">Core Department / Branch</label><select name="department" id="department-select" class="w-full px-4 py-3.5 glass-input rounded-2xl focus:outline-none text-sm font-medium" required><option value="" disabled selected hidden>-- Select Department --</option></select></div>
+                <div class="grid grid-cols-2 gap-3">
+                    <div><label class="block text-xs font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider mb-2">Year of Study</label><select name="year" id="year-select" onchange="updateSemesters()" class="w-full px-4 py-3.5 glass-input rounded-2xl focus:outline-none text-sm font-medium" required><option value="" disabled selected hidden>-- Select Year --</option><option value="1st Year">1st Year</option><option value="2nd Year">2nd Year</option><option value="3rd Year">3rd Year</option><option value="4th Year / Final">4th Year / Final</option></select></div>
+                    <div><label class="block text-xs font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider mb-2">Semester</label><select name="semester" id="semester-select" class="w-full px-4 py-3.5 glass-input rounded-2xl focus:outline-none text-sm font-medium" required><option value="" disabled selected hidden>-- Select Sem --</option></select></div>
+                </div>
+                <div><label class="block text-xs font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider mb-2">Subject Name</label><input type="text" id="student-subject-input" required class="w-full px-4 py-3.5 glass-input rounded-2xl focus:outline-none text-sm font-medium" placeholder="e.g. Digital Signal Processing"></div>
+                <div><label class="block text-xs font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider mb-2">Specific Topic / Technical Name</label><input type="text" id="student-topic-input" required class="w-full px-4 py-3.5 glass-input rounded-2xl focus:outline-none text-sm font-medium" placeholder="e.g. Fourier Transforms or Z-Transforms"></div>
+                <div><label class="block text-xs font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider mb-2">Question Count</label><select name="count" class="w-full px-4 py-3.5 glass-input rounded-2xl focus:outline-none text-sm font-medium" required><option value="10">10 Questions</option><option value="20">20 Questions</option><option value="50">50 Questions</option></select></div>
+            `;
+            updateProfessions(); updateSemesters();
+        } else if(persona === 'Aspirant') {
+            container.innerHTML = `
+                <div><label class="block text-xs font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider mb-2">Select Major Exam</label><select name="exam" id="exam-select" onchange="updateAspirantSubjects()" class="w-full px-4 py-3.5 glass-input rounded-2xl focus:outline-none text-sm font-medium" required><option value="" disabled selected hidden>-- Select Exam --</option><option value="NEET">NEET</option><option value="JEE">JEE</option><option value="TNPSC Group Exams">TNPSC Group Exams</option><option value="UPSC Civil Services">UPSC Civil Services</option><option value="Others">Others</option></select></div>
+                <div><label class="block text-xs font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider mb-2">Exam Subject / Group</label><select name="exam_subject" id="exam-subject-select" class="w-full px-4 py-3.5 glass-input rounded-2xl focus:outline-none text-sm font-medium" required><option value="" disabled selected hidden>-- Select Subject / Group --</option></select></div>
+                <div><label class="block text-xs font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider mb-2">Specific Topic / Technical Name</label><input type="text" id="aspirant-topic-input" required class="w-full px-4 py-3.5 glass-input rounded-2xl focus:outline-none text-sm font-medium" placeholder="e.g. Indian Polity or Mechanics"></div>
+
+                <div id="tnpsc-lang-box" class="hidden"><label class="block text-xs font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider mb-2">Preferred Question Language (TNPSC)</label><select name="tnpsc_lang" id="tnpsc-lang-select" class="w-full px-4 py-3.5 glass-input rounded-2xl focus:outline-none text-sm font-medium"><option value="English">English</option><option value="Tamil">Tamil (தமிழ்)</option></select></div>
+
+                <div class="p-3 bg-indigo-500/10 border border-indigo-500/20 rounded-2xl text-xs text-indigo-400 text-center font-bold">📌 Aspirant exams include 50 questions (80-20 rule).</div>
+                <input type="hidden" name="count" value="50">
+            `;
+            updateAspirantSubjects();
+        } else if(persona === 'Job Seeker') {
+            container.innerHTML = `
+                <div><label class="block text-xs font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider mb-2">Candidate Status</label><select name="exp_status" id="exp-status" class="w-full px-4 py-3.5 glass-input rounded-2xl focus:outline-none text-sm font-medium" required><option value="" disabled selected hidden>-- Select Status --</option><option value="Fresher">Fresher</option><option value="Experienced">Experienced</option></select></div>
+                <div><label class="block text-xs font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider mb-2">Industry Sector</label><select name="industry" id="industry-select" onchange="updateJobRoles()" class="w-full px-4 py-3.5 glass-input rounded-2xl focus:outline-none text-sm font-medium" required><option value="" disabled selected hidden>-- Select Sector --</option><option value="Software Development">Software Development</option><option value="Data & AI">Data & AI</option><option value="Core Engineering & Manufacturing">Core Engineering & Manufacturing</option><option value="Finance & Accounting">Finance & Accounting</option><option value="Others">Others</option></select></div>
+                <div><label class="block text-xs font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider mb-2">Target Job Role</label><select name="job_role" id="job-role-select" class="w-full px-4 py-3.5 glass-input rounded-2xl focus:outline-none text-sm font-medium" required><option value="" disabled selected hidden>-- Select Role --</option></select></div>
+                <div><label class="block text-xs font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider mb-2">Specific Topic / Technical Name</label><input type="text" id="job-topic-input" required class="w-full px-4 py-3.5 glass-input rounded-2xl focus:outline-none text-sm font-medium" placeholder="e.g. React Hooks, SAP MM, SQL Joins"></div>
+                <div><label class="block text-xs font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider mb-2">Question Count</label><select name="count" class="w-full px-4 py-3.5 glass-input rounded-2xl focus:outline-none text-sm font-medium" required><option value="10">10 Questions</option><option value="20">20 Questions</option><option value="50">50 Questions</option></select></div>
+            `;
+            updateJobRoles();
+        } else {
+            container.innerHTML = `
+                <div><label class="block text-xs font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider mb-2">Skill Training Topic / Technical Name</label><input type="text" id="skill-topic-input" required class="w-full px-4 py-3.5 glass-input rounded-2xl focus:outline-none text-sm font-medium" placeholder="e.g. Python Functions or SQL Joins"></div>
+                <div><label class="block text-xs font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider mb-2">Question Count</label><select name="count" class="w-full px-4 py-3.5 glass-input rounded-2xl focus:outline-none text-sm font-medium" required><option value="10">10 Questions</option><option value="20">20 Questions</option><option value="50">50 Questions</option></select></div>
+            `;
+        }
+    }
+
+    function updateProfessions() {
+        let level = document.getElementById('edu-level'); if(!level) return;
+        let profSelect = document.getElementById('profession-select'); profSelect.innerHTML = '<option value="" disabled selected hidden>-- Select Profession --</option>';
+        (level.value === 'UG' ? ugProfessions : pgProfessions).forEach(p => { let opt = document.createElement('option'); opt.value = p; opt.textContent = p; profSelect.appendChild(opt); });
+        updateDepartments();
+    }
+    function updateDepartments() {
+        let prof = document.getElementById('profession-select'); if(!prof) return;
+        let deptSelect = document.getElementById('department-select'); deptSelect.innerHTML = '<option value="" disabled selected hidden>-- Select Department --</option>';
+        (departmentsMap[prof.value] || ["General Department"]).forEach(d => { let opt = document.createElement('option'); opt.value = d; opt.textContent = d; deptSelect.appendChild(opt); });
+    }
+    function updateAspirantSubjects() {
+        let exam = document.getElementById('exam-select'); if(!exam) return;
+        let subSelect = document.getElementById('exam-subject-select'); subSelect.innerHTML = '<option value="" disabled selected hidden>-- Select Subject --</option>';
+        let tnpscBox = document.getElementById('tnpsc-lang-box');
+        if(exam.value === 'TNPSC Group Exams') { tnpscBox.classList.remove('hidden'); } else { tnpscBox.classList.add('hidden'); }
+        (aspirantExamsMap[exam.value] || ["General Studies"]).forEach(s => { let opt = document.createElement('option'); opt.value = s; opt.textContent = s; subSelect.appendChild(opt); });
+    }
+    function updateSemesters() {
+        let year = document.getElementById('year-select'); if(!year) return;
+        let semSelect = document.getElementById('semester-select'); semSelect.innerHTML = '<option value="" disabled selected hidden>-- Select Sem --</option>';
+        (year.value === '1st Year' ? ["Semester 1", "Semester 2"] : year.value === '2nd Year' ? ["Semester 3", "Semester 4"] : year.value === '3rd Year' ? ["Semester 5", "Semester 6"] : ["Semester 7", "Semester 8"]).forEach(s => { let opt = document.createElement('option'); opt.value = s; opt.textContent = s; semSelect.appendChild(opt); });
+    }
+    function updateJobRoles() {
+        let ind = document.getElementById('industry-select'); if(!ind) return;
+        let roleSelect = document.getElementById('job-role-select'); roleSelect.innerHTML = '<option value="" disabled selected hidden>-- Select Role --</option>';
+        (jobRolesMap[ind.value] || ["General Role"]).forEach(r => { let opt = document.createElement('option'); opt.value = r; opt.textContent = r; roleSelect.appendChild(opt); });
+    }
+    
+    function validateQuizForm(event) {
+        let persona = document.getElementById('persona-select').value;
+        let finalSubjectInput = document.getElementById('final-subject-input');
+
+        if(persona === 'Student') {
+            let prof = document.getElementById('profession-select').value;
+            let dept = document.getElementById('department-select').value;
+            let sub = document.getElementById('student-subject-input').value.trim();
+            let topic = document.getElementById('student-topic-input').value.trim();
+            finalSubjectInput.value = `${prof} - ${dept} - ${sub} - Technical: ${topic}`;
+        } 
+        else if(persona === 'Aspirant') {
+            let examSelect = document.getElementById('exam-select').value;
+            let subSelect = document.getElementById('exam-subject-select').value;
+            let topic = document.getElementById('aspirant-topic-input').value.trim();
+            let lang = (examSelect === 'TNPSC Group Exams') ? ` [Language: ${document.getElementById('tnpsc-lang-select').value}]` : '';
+            finalSubjectInput.value = `${examSelect} - ${subSelect} - Technical Topic: ${topic}${lang}`;
+        } 
+        else if(persona === 'Job Seeker') {
+            let indSelect = document.getElementById('industry-select').value;
+            let roleSelect = document.getElementById('job-role-select').value;
+            let topic = document.getElementById('job-topic-input').value.trim();
+            finalSubjectInput.value = `${indSelect} - ${roleSelect} - Technical: ${topic}`;
+        } 
+        else {
+            let skillTopic = document.getElementById('skill-topic-input').value.trim();
+            finalSubjectInput.value = skillTopic;
+        }
+
+        let overlay = document.getElementById('loading-overlay');
+        if(overlay) overlay.classList.remove('hidden');
+        return true;
+    }
+</script>
+{% endblock %}

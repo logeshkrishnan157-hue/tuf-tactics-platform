@@ -1,0 +1,21 @@
+{% extends "base.html" %}
+{% block title %}Mock Interview Live - TufTactics{% endblock %}
+{% block content %}
+<div class="w-full max-w-2xl mx-auto glass-card p-8 sm:p-10 rounded-3xl shadow-2xl">
+    <div class="flex flex-col sm:flex-row justify-between items-center mb-6 gap-4 border-b pb-4 border-indigo-500/10">
+        <div><span class="px-3 py-1 bg-indigo-500/10 text-indigo-400 text-xs font-bold rounded-full border border-indigo-500/20">{{ question.category }}</span><h1 class="text-lg font-extrabold mt-2">Role: {{ role }}</h1></div>
+        <div class="px-4 py-2 bg-indigo-500/10 border border-indigo-500/20 text-indigo-400 text-xs rounded-2xl font-mono font-bold">Question {{ index }} of {{ total }}</div>
+    </div>
+    <form method="POST" class="space-y-6">
+        <h3 class="text-base sm:text-lg font-bold mb-6 leading-relaxed">{{ question.question }}</h3>
+        <div class="space-y-3.5 mb-8">
+            {% for opt in question.options %}
+            <label class="glass-card flex items-center p-4 rounded-2xl border border-transparent hover:border-indigo-500/40 cursor-pointer transition font-medium text-sm sm:text-base">
+                <input type="radio" name="answer" value="{{ opt }}" required class="w-4 h-4 text-indigo-600 focus:ring-indigo-500 mr-3"><span>{{ opt }}</span>
+            </label>
+            {% endfor %}
+        </div>
+        <button type="submit" class="w-full py-4 theme-btn-bg font-bold rounded-2xl transition shadow-xl text-white">{% if index == total %}Finish & View Report ➔{% else %}Next Question ➔{% endif %}</button>
+    </form>
+</div>
+{% endblock %}

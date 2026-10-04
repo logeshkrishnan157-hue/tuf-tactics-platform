@@ -1,0 +1,13 @@
+# Python cache & virtual environment
+venv/
+__pycache__/
+
+# Local Database
+edtech.db
+
+# Environment variables & secrets
+.env
+
+# Reports or CSV logs
+daily_report.csv
+new_users_report.csv

@@ -82,6 +82,13 @@ class ActiveQuiz(db.Model):
     current_index = db.Column(db.Integer, default=0)
     user_answers = db.Column(db.Text, default='{}')
 
+# Safe table creation on startup
+with app.app_context():
+    try:
+        db.create_all()
+    except Exception as e:
+        print("DB Init Error:", e)
+
 def append_to_daily_report(user_id, name, email, category, rating, message):
     csv_file = os.path.join(BASE_DIR, 'daily_report.csv')
     file_exists = os.path.isfile(csv_file)
@@ -156,13 +163,15 @@ def login():
     if request.method == 'POST':
         identifier = request.form.get('identifier', '').strip().lower()
         pin = request.form.get('pin', '').strip()
-        user = User.query.filter((db.func.lower(User.email) == identifier) | (User.phone == identifier)).first()
-        if user and user.pin == pin:
-            session['user_id'] = user.user_unique_id
-            session['user_name'] = user.name
-            return redirect(url_for('dashboard'))
-        else:
-            return render_template('login.html', error="Invalid Email/Phone or 4-Digit PIN!", is_success=False, theme=session.get('theme', 'dark'))
+        try:
+            user = User.query.filter((db.func.lower(User.email) == identifier) | (User.phone == identifier)).first()
+            if user and user.pin == pin:
+                session['user_id'] = user.user_unique_id
+                session['user_name'] = user.name
+                return redirect(url_for('dashboard'))
+        except Exception as e:
+            print("Login DB Error:", e)
+        return render_template('login.html', error="Invalid Email/Phone or 4-Digit PIN!", is_success=False, theme=session.get('theme', 'dark'))
     return render_template('login.html', theme=session.get('theme', 'dark'))
 
 @app.route('/signup', methods=['GET', 'POST'])
@@ -179,18 +188,25 @@ def signup():
             return render_template('signup.html', error="Phone number must be exactly 10 numeric digits!", theme=session.get('theme', 'dark'))
         if len(pin) != 4 or not pin.isdigit():
             return render_template('signup.html', error="PIN must be exactly 4 numeric digits!", theme=session.get('theme', 'dark'))
-        if User.query.filter_by(email=email).first():
-            return render_template('signup.html', error="Email already registered! Please sign in.", theme=session.get('theme', 'dark'))
         
-        unique_id = f"TUF-{random.randint(10000, 99999)}"
-        new_user = User(user_unique_id=unique_id, name=name, email=email, phone=phone, age=int(age), pin=pin)
-        db.session.add(new_user)
-        db.session.commit()
-        log_new_user_to_csv(unique_id, name, email, phone, age)
+        try:
+            if User.query.filter_by(email=email).first():
+                return render_template('signup.html', error="Email already registered! Please sign in.", theme=session.get('theme', 'dark'))
+            
+            unique_id = f"TUF-{random.randint(10000, 99999)}"
+            new_user = User(user_unique_id=unique_id, name=name, email=email, phone=phone, age=int(age), pin=pin)
+            db.session.add(new_user)
+            db.session.commit()
+            log_new_user_to_csv(unique_id, name, email, phone, age)
 
-        session['user_id'] = unique_id
-        session['user_name'] = new_user.name
-        return redirect(url_for('dashboard'))
+            session['user_id'] = unique_id
+            session['user_name'] = new_user.name
+            return redirect(url_for('dashboard'))
+        except Exception as e:
+            db.session.rollback()
+            print("Signup Error:", e)
+            return render_template('signup.html', error="An error occurred during registration. Please try again.", theme=session.get('theme', 'dark'))
+            
     return render_template('signup.html', theme=session.get('theme', 'dark'))
 
 @app.route('/forgot-pin', methods=['GET', 'POST'])
@@ -201,13 +217,15 @@ def forgot_pin():
         new_pin = request.form.get('new_pin', '').strip()
         if len(new_pin) != 4 or not new_pin.isdigit():
             return render_template('forgot_pin.html', error="New PIN must be exactly 4 digits!", theme=session.get('theme', 'dark'))
-        user = User.query.filter(((db.func.lower(User.email) == identifier) | (db.func.lower(User.phone) == identifier)) & (db.func.lower(User.name) == name)).first()
-        if user:
-            user.pin = new_pin
-            db.session.commit()
-            return render_template('login.html', error="PIN successfully updated! Please sign in with your new PIN.", is_success=True, theme=session.get('theme', 'dark'))
-        else:
-            return render_template('forgot_pin.html', error="Verification failed! Records do not match.", theme=session.get('theme', 'dark'))
+        try:
+            user = User.query.filter(((db.func.lower(User.email) == identifier) | (db.func.lower(User.phone) == identifier)) & (db.func.lower(User.name) == name)).first()
+            if user:
+                user.pin = new_pin
+                db.session.commit()
+                return render_template('login.html', error="PIN successfully updated! Please sign in with your new PIN.", is_success=True, theme=session.get('theme', 'dark'))
+        except Exception as e:
+            print("Forgot PIN Error:", e)
+        return render_template('forgot_pin.html', error="Verification failed! Records do not match.", theme=session.get('theme', 'dark'))
     return render_template('forgot_pin.html', theme=session.get('theme', 'dark'))
 
 @app.route('/update-pin', methods=['POST'])
@@ -538,7 +556,4 @@ def save_quiz_result():
     return jsonify({"status": "success"})
 
 if __name__ == '__main__':
-    with app.app_context():
-        # Clean sync for deployment & cache preservation
-        db.create_all()
     app.run(debug=True, port=5000)

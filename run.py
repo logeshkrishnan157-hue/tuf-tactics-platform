@@ -539,6 +539,6 @@ def save_quiz_result():
 
 if __name__ == '__main__':
     with app.app_context():
-        db.drop_all()  # Old mismatch aana tables-ah clear panrathukku
-        db.create_all() # Pudhu columns-oda tables-ah create panrathu
+        # Clean sync for deployment & cache preservation
+        db.create_all()
     app.run(debug=True, port=5000)
